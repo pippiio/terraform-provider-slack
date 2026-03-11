@@ -7,7 +7,7 @@ import (
 	"context"
 	"flag"
 	"log"
-	"terraform-provider-slack/provider"
+	"terraform-provider-slack/internal/provider"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )

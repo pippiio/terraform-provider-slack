@@ -6,7 +6,10 @@ terraform {
   }
 }
 
-provider "slack" {}
+provider "slack" {
+  host  = "TEST"
+  token = "TEST"
+}
 
 resource "slack_message" "this" {
 }
