@@ -12,7 +12,6 @@ provider "slack" {
 }
 
 resource "slack_message" "this" {
-  type      = ""
   message   = "test"
-  slack_ids = "user"
+  slack_ids = ["user1", "user2", "channel"]
 }
