@@ -118,11 +118,10 @@ func (c *Client) UpdateMessage(channel_ID, ts, text string) (*Response, error) {
 	return &res, nil
 }
 
-func (c *Client) DeleteMessage(channel_ID, ts string) (*Response, error) {
-
+func (c *Client) DeleteMessage(channel_ID, ts string) error {
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/api/chat.delete", c.Host), nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
 
@@ -131,16 +130,10 @@ func (c *Client) DeleteMessage(channel_ID, ts string) (*Response, error) {
 	q.Add("ts", ts)
 	req.URL.RawQuery = q.Encode()
 
-	body, err := c.doRequest(req)
+	_, err = c.doRequest(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	res := Response{}
-	err = json.Unmarshal(body, &res)
-	if err != nil {
-		return nil, err
-	}
-
-	return &res, nil
+	return nil
 }

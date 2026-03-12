@@ -234,7 +234,7 @@ func (r *messageResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	for slackID := range stateIDs {
 		if !planIDs[slackID] {
-			_, _ = r.client.DeleteMessage(slackID, state.Msg_map.Elements()[slackID].(types.Object).Attributes()["ts"].(types.String).ValueString())
+			_ = r.client.DeleteMessage(slackID, state.Msg_map.Elements()[slackID].(types.Object).Attributes()["ts"].(types.String).ValueString())
 		}
 	}
 
@@ -318,5 +318,22 @@ func (r *messageResource) Update(ctx context.Context, req resource.UpdateRequest
 }
 
 func (r *messageResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state messageResourceModel
+	diags := req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
+	for slackID, v := range state.Msg_map.Elements() {
+		err := r.client.DeleteMessage(slackID, v.(types.Object).Attributes()["ts"].(types.String).ValueString())
+
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error Deleting HashiCups Order",
+				"Could not delete order, unexpected error: "+err.Error(),
+			)
+			return
+		}
+	}
 }

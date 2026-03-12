@@ -13,5 +13,5 @@ provider "slack" {
 
 resource "slack_message" "this" {
   message   = "test"
-  slack_ids = ["user1", "user2", "channel"]
+  slack_ids = ["U0001", "U0002", "C0001"]
 }
