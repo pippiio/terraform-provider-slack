@@ -97,7 +97,7 @@ func (r *messageResource) Create(ctx context.Context, req resource.CreateRequest
 
 	for _, v := range plan.Slack_IDs.Elements() {
 
-		apiresp, err := r.client.SendMessage(plan.Message.ValueString(), v.(types.String).ValueString())
+		apiresp, err := r.client.SendMessage(v.(types.String).ValueString(), plan.Message.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Error send message",
@@ -162,15 +162,18 @@ func (r *messageResource) Read(ctx context.Context, req resource.ReadRequest, re
 		}
 
 		channelValue := types.StringValue(apiresp.Channel)
+		tsValue := types.StringValue(ts)
 		if apiresp.Channel == "" {
 			channelValue = types.StringValue(channel)
 		}
-
+		if len(apiresp.Messages) > 0 && apiresp.Messages[0].Ts != "" {
+			tsValue = types.StringValue(apiresp.Messages[0].Ts)
+		}
 		obj, diagsObj := types.ObjectValue(map[string]attr.Type{
 			"ts":      types.StringType,
 			"channel": types.StringType,
 		}, map[string]attr.Value{
-			"ts":      types.StringValue(apiresp.Messages[0].Ts),
+			"ts":      tsValue,
 			"channel": channelValue,
 		})
 		resp.Diagnostics.Append(diagsObj...)
@@ -208,7 +211,112 @@ func (r *messageResource) Read(ctx context.Context, req resource.ReadRequest, re
 }
 
 func (r *messageResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan messageResourceModel
+	var state messageResourceModel
+	diags := req.Plan.Get(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	diags = req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	planIDs := make(map[string]bool)
+	for _, v := range plan.Slack_IDs.Elements() {
+		id := v.(types.String).ValueString()
+		planIDs[id] = true
+	}
+
+	stateIDs := make(map[string]bool)
+	for k := range state.Msg_map.Elements() {
+		stateIDs[k] = true
+	}
+
+	for slackID := range stateIDs {
+		if !planIDs[slackID] {
+			_, _ = r.client.DeleteMessage(slackID, state.Msg_map.Elements()[slackID].(types.Object).Attributes()["ts"].(types.String).ValueString())
+		}
+	}
+
+	msgMap := make(map[string]attr.Value)
+
+	for slackID := range planIDs {
+		var ts, channel string
+		exists := false
+
+		if s, ok := state.Msg_map.Elements()[slackID]; ok {
+			obj := s.(types.Object)
+			attrs := obj.Attributes()
+			ts = attrs["ts"].(types.String).ValueString()
+			channel = attrs["channel"].(types.String).ValueString()
+			exists = true
+		}
+
+		var apiResp *slackclient.Response
+		var err error
+
+		if !exists {
+
+			apiResp, err = r.client.SendMessage(slackID, plan.Message.ValueString())
+
+		} else if plan.Message.ValueString() != state.Message.ValueString() {
+
+			apiResp, err = r.client.UpdateMessage(slackID, ts, plan.Message.ValueString())
+
+		}
+
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error sending/updating message",
+				fmt.Sprintf("Slack ID: %s, Error: %s", slackID, err.Error()),
+			)
+			return
+		}
+
+		if apiResp != nil {
+			if apiResp.Ts != "" {
+				ts = apiResp.Ts
+			}
+			if len(apiResp.Messages) > 0 {
+				ts = apiResp.Messages[0].Ts
+			}
+			if apiResp.Channel != "" {
+				channel = apiResp.Channel
+			}
+		}
+		msgMap[slackID], _ = types.ObjectValue(
+			map[string]attr.Type{
+				"ts":      types.StringType,
+				"channel": types.StringType,
+			},
+			map[string]attr.Value{
+				"ts":      types.StringValue(ts),
+				"channel": types.StringValue(channel),
+			},
+		)
+	}
+
+	plan.Msg_map, diags = types.MapValue(types.ObjectType{
+		AttrTypes: map[string]attr.Type{
+			"ts":      types.StringType,
+			"channel": types.StringType,
+		},
+	}, msgMap)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	plan.LastUpdated = types.StringValue(time.Now().Format(time.RFC850))
+
+	diags = resp.State.Set(ctx, plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 }
 
 func (r *messageResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+
 }
