@@ -8,7 +8,32 @@ import (
 )
 
 type Response struct {
-	Ts string `json:"ts,omitempty"`
+	Ts       string        `json:"ts,omitempty"`
+	Channel  string        `json:"channel,omitempty"`
+	Err      string        `json:"error,omitempty"`
+	Messages []MessageData `json:"messages,omitempty"`
+}
+type MessageData struct {
+	Ts   string `json:"ts,omitempty"`
+	Text string `json:"text,omitempty"`
+}
+
+func (c *Client) doRequest(req *http.Request) ([]byte, error) {
+	resRaw, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resRaw.Body.Close()
+
+	body, err := io.ReadAll(resRaw.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resRaw.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status: %d, body: %s", resRaw.StatusCode, body)
+	}
+	return body, err
 }
 
 func (c *Client) SendMessage(message, slack_ID string) (*Response, error) {
@@ -24,19 +49,36 @@ func (c *Client) SendMessage(message, slack_ID string) (*Response, error) {
 	q.Add("text", message)
 	req.URL.RawQuery = q.Encode()
 
-	resRaw, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resRaw.Body.Close()
-
-	body, err := io.ReadAll(resRaw.Body)
+	body, err := c.doRequest(req)
 	if err != nil {
 		return nil, err
 	}
 
-	if resRaw.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status: %d, body: %s", resRaw.StatusCode, body)
+	res := Response{}
+	err = json.Unmarshal(body, &res)
+	if err != nil {
+		return nil, err
+	}
+
+	return &res, nil
+}
+
+func (c *Client) ReadMessage(channel_ID, ts string) (*Response, error) {
+
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/api/conversations.replies", c.Host), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
+
+	q := req.URL.Query()
+	q.Add("channel", channel_ID)
+	q.Add("ts", ts)
+	req.URL.RawQuery = q.Encode()
+
+	body, err := c.doRequest(req)
+	if err != nil {
+		return nil, err
 	}
 
 	res := Response{}

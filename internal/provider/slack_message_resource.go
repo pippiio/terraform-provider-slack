@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -29,7 +30,7 @@ type messageResourceModel struct {
 	Message     types.String `tfsdk:"message"`
 	Slack_IDs   types.Set    `tfsdk:"slack_ids"`
 	LastUpdated types.String `tfsdk:"last_updated"`
-	Ts          types.List   `tfsdk:"ts"`
+	Msg_map     types.Map    `tfsdk:"msg_map"`
 }
 
 func (r *messageResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -49,9 +50,18 @@ func (r *messageResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			"last_updated": schema.StringAttribute{
 				Computed: true,
 			},
-			"ts": schema.ListAttribute{
-				ElementType: types.StringType,
-				Computed:    true,
+			"msg_map": schema.MapNestedAttribute{
+				Computed: true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"ts": schema.StringAttribute{
+							Computed: true,
+						},
+						"channel": schema.StringAttribute{
+							Computed: true,
+						},
+					},
+				},
 			},
 		},
 	}
@@ -83,7 +93,7 @@ func (r *messageResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	var tsSlice []attr.Value
+	msgMap := make(map[string]attr.Value)
 
 	for _, v := range plan.Slack_IDs.Elements() {
 
@@ -95,10 +105,34 @@ func (r *messageResource) Create(ctx context.Context, req resource.CreateRequest
 			)
 			return
 		}
-		tsSlice = append(tsSlice, types.StringValue(apiresp.Ts))
+
+		obj, diagsObj := types.ObjectValue(map[string]attr.Type{
+			"ts":      types.StringType,
+			"channel": types.StringType,
+		}, map[string]attr.Value{
+			"ts":      types.StringValue(apiresp.Ts),
+			"channel": types.StringValue(apiresp.Channel),
+		})
+		resp.Diagnostics.Append(diagsObj...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		msgMap[v.(types.String).ValueString()] = obj
 	}
 
-	plan.Ts = types.ListValueMust(types.StringType, tsSlice)
+	var diagsMap diag.Diagnostics
+	plan.Msg_map, diagsMap = types.MapValue(types.ObjectType{
+		AttrTypes: map[string]attr.Type{
+			"ts":      types.StringType,
+			"channel": types.StringType,
+		},
+	}, msgMap)
+	resp.Diagnostics.Append(diagsMap...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	plan.LastUpdated = types.StringValue(time.Now().Format(time.RFC850))
 
 	diags = resp.State.Set(ctx, plan)
@@ -110,6 +144,67 @@ func (r *messageResource) Create(ctx context.Context, req resource.CreateRequest
 }
 
 func (r *messageResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state messageResourceModel
+	diags := req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	msgMap := make(map[string]attr.Value)
+
+	for k, v := range state.Msg_map.Elements() {
+
+		channel := v.(types.Object).Attributes()["channel"].(types.String).ValueString()
+		ts := v.(types.Object).Attributes()["ts"].(types.String).ValueString()
+		apiresp, err := r.client.ReadMessage(channel, ts)
+		if err != nil || apiresp.Err == "thread_not_found" {
+			continue
+		}
+
+		channelValue := types.StringValue(apiresp.Channel)
+		if apiresp.Channel == "" {
+			channelValue = types.StringValue(channel)
+		}
+
+		obj, diagsObj := types.ObjectValue(map[string]attr.Type{
+			"ts":      types.StringType,
+			"channel": types.StringType,
+		}, map[string]attr.Value{
+			"ts":      types.StringValue(apiresp.Messages[0].Ts),
+			"channel": channelValue,
+		})
+		resp.Diagnostics.Append(diagsObj...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		msgMap[k] = obj
+	}
+	state.LastUpdated = types.StringValue(time.Now().Format(time.RFC850))
+
+	if len(msgMap) <= 0 {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	var diagsMap diag.Diagnostics
+	state.Msg_map, diagsMap = types.MapValue(types.ObjectType{
+		AttrTypes: map[string]attr.Type{
+			"ts":      types.StringType,
+			"channel": types.StringType,
+		},
+	}, msgMap)
+	resp.Diagnostics.Append(diagsMap...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	diags = resp.State.Set(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 }
 
 func (r *messageResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
