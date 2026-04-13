@@ -38,10 +38,12 @@ func (d *userIdDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"usernames": schema.SetAttribute{
+				Description: "Set of usernames to get userids for.",
 				ElementType: types.StringType,
 				Required:    true,
 			},
-			"slack_ids": schema.SetAttribute{
+			"slack_ids": schema.MapAttribute{
+				Description: "The map of usernames and userids",
 				Computed:    true,
 				ElementType: types.StringType,
 			},

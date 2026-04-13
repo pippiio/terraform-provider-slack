@@ -52,11 +52,13 @@ func (p *slackProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
-				Optional: true,
+				Description: "URI for Slack API. May also be provided via SLACK_HOST environment variable.",
+				Optional:    true,
 			},
 			"token": schema.StringAttribute{
-				Optional:  true,
-				Sensitive: true,
+				Description: "Bearer Token for Slack API. May also be provided via SLACK_TOKEN environment variable.",
+				Optional:    true,
+				Sensitive:   true,
 			},
 		},
 	}
