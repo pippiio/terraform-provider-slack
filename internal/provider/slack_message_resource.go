@@ -41,9 +41,11 @@ func (r *messageResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"message": schema.StringAttribute{
-				Required: true,
+				Description: "Slack message to be sent",
+				Required:    true,
 			},
 			"slack_ids": schema.SetAttribute{
+				Description: "Set of slackids to send the message to",
 				ElementType: types.StringType,
 				Required:    true,
 			},
@@ -55,10 +57,12 @@ func (r *messageResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"ts": schema.StringAttribute{
-							Computed: true,
+							Description: "Time stamp of the message",
+							Computed:    true,
 						},
 						"channel": schema.StringAttribute{
-							Computed: true,
+							Description: "Channel id of the message",
+							Computed:    true,
 						},
 					},
 				},
