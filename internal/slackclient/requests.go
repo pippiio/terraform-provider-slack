@@ -7,6 +7,15 @@ import (
 	"net/http"
 )
 
+type UserReponse struct {
+	Members []MembersData `json:"members"`
+}
+
+type MembersData struct {
+	Id   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type Response struct {
 	Ts       string        `json:"ts,omitempty"`
 	Channel  string        `json:"channel,omitempty"`
@@ -136,4 +145,26 @@ func (c *Client) DeleteMessage(channel_ID, ts string) error {
 	}
 
 	return nil
+}
+
+func (c *Client) ReadUserIds() (*UserReponse, error) {
+
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/api/users.list", c.Host), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
+
+	body, err := c.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	res := UserReponse{}
+	err = json.Unmarshal(body, &res)
+	if err != nil {
+		return nil, err
+	}
+
+	return &res, nil
 }

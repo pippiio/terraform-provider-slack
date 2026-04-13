@@ -11,7 +11,11 @@ provider "slack" {
   token = "xoxb-1234567890"
 }
 
+data "slack_user_ids" "this" {
+  usernames = ["u1", "u2"]
+}
+
 resource "slack_message" "this" {
   message   = "test"
-  slack_ids = ["U0001", "U0002", "C0001"]
+  slack_ids = toset(values(data.slack_user_ids.this.slack_ids))
 }
