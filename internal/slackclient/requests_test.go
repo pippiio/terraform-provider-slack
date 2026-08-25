@@ -1,7 +1,9 @@
 package slackclient
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -62,5 +64,88 @@ func TestReadUserIds_Smoke(t *testing.T) {
 	}
 	if rec.last().Path != "/api/users.list" {
 		t.Errorf("path = %q, want /api/users.list", rec.last().Path)
+	}
+}
+
+// --- doRequest: A-1 (Slack ok:false must surface as *SlackError) ---
+
+// TestDoRequest_OkFalseReturnsSlackError is the core A-1 test. Slack answers HTTP 200
+// with {"ok":false,...} for application failures; before this change doRequest returned
+// the body with a nil error and the caller reported success.
+func TestDoRequest_OkFalseReturnsSlackError(t *testing.T) {
+	for _, code := range []string{"users_not_found", "missing_scope", "invalid_auth", "ratelimited"} {
+		t.Run(code, func(t *testing.T) {
+			c, _ := newTestClient(t, routes{
+				"/api/users.info": fixture("err_" + code + ".json"),
+			})
+
+			body, err := c.doRequest(mustRequest(t, http.MethodGet, c.Host+"/api/users.info"))
+			if err == nil {
+				t.Fatalf("expected an error for ok:false, got nil (body=%s)", body)
+			}
+
+			var se *SlackError
+			if !errors.As(err, &se) {
+				t.Fatalf("error is %T (%v), want *SlackError", err, err)
+			}
+			if se.Code != code {
+				t.Errorf("Code = %q, want %q", se.Code, code)
+			}
+			if se.Endpoint != "users.info" {
+				t.Errorf("Endpoint = %q, want %q", se.Endpoint, "users.info")
+			}
+		})
+	}
+}
+
+// TestDoRequest_OkTruePassesThrough proves the success path is untouched.
+func TestDoRequest_OkTruePassesThrough(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/chat.postMessage": fixture("chat_postmessage_ok.json"),
+	})
+
+	body, err := c.doRequest(mustRequest(t, http.MethodPost, c.Host+"/api/chat.postMessage"))
+	if err != nil {
+		t.Fatalf("unexpected error on ok:true response: %v", err)
+	}
+	if !strings.Contains(string(body), "1503435956.000247") {
+		t.Errorf("body did not pass through intact: %s", body)
+	}
+}
+
+// TestDoRequest_NonOKStatusKeepsExistingBehaviour guards the pre-existing HTTP-status
+// error path, which must stay a plain error and not become a SlackError.
+func TestDoRequest_NonOKStatusKeepsExistingBehaviour(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/users.info": raw(http.StatusInternalServerError, `{"ok":false,"error":"internal_error"}`),
+	})
+
+	_, err := c.doRequest(mustRequest(t, http.MethodGet, c.Host+"/api/users.info"))
+	if err == nil {
+		t.Fatal("expected an error for HTTP 500")
+	}
+	var se *SlackError
+	if errors.As(err, &se) {
+		t.Errorf("HTTP-status failure became a *SlackError; want a plain transport error")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error %q should mention the status code", err.Error())
+	}
+}
+
+// TestDoRequest_NonJSONBodyPassesThrough proves an unparseable body is not swallowed as
+// a false success or a bogus SlackError -- it reaches the caller, whose json.Unmarshal
+// produces the real error. Preserves existing behaviour.
+func TestDoRequest_NonJSONBodyPassesThrough(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/users.info": raw(http.StatusOK, `<html>not json</html>`),
+	})
+
+	body, err := c.doRequest(mustRequest(t, http.MethodGet, c.Host+"/api/users.info"))
+	if err != nil {
+		t.Fatalf("unparseable body should pass through, got error: %v", err)
+	}
+	if string(body) != `<html>not json</html>` {
+		t.Errorf("body = %q, want it passed through unchanged", body)
 	}
 }
