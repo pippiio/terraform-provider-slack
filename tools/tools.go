@@ -1,8 +1,20 @@
+//go:build tools
+
+// Package tools pins the build-time tooling this module depends on.
+//
+// The blank import is load-bearing: without it nothing in the module references
+// terraform-plugin-docs, so `go mod tidy` drops it from go.mod and `go generate`
+// then fails with "no required module provides package". The `tools` build tag keeps
+// the package out of ordinary builds.
+//
+// See https://go.dev/wiki/Modules#how-can-i-track-tool-dependencies-for-a-module
 package tools
 
+import (
+	_ "github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs"
+)
+
 // Format Terraform code for use in documentation.
-// If you do not have Terraform installed, you can remove the formatting command, but it is suggested
-// to ensure the documentation is formatted properly.
 //go:generate terraform fmt -recursive ../examples/
 
 // Generate documentation.
