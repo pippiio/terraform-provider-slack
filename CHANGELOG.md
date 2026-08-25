@@ -65,11 +65,10 @@ becoming visible, not a new fault. Expect to see errors from:
 
 ### Known issues
 
-- `chat.update` and `chat.delete` are still issued with `GET`, though Slack documents them
-  as `POST`. Whether they currently succeed is unverified — see `internal/slackclient/probe_test.go`.
-  **This must be resolved before release**: if those calls have been failing silently, the
-  error-surfacing fix above will convert them into hard failures for `terraform destroy`
-  and message updates.
+- `chat.update` and `chat.delete` are issued with `GET`, though Slack documents both as
+  `POST`. Verified against a live workspace: both currently succeed, so this is a latent
+  correctness issue rather than a functional one. Slack's Web API is permissive here today
+  and could tighten without notice.
 - Custom profile fields (`profile.fields`), `enterprise_user` (Enterprise Grid), and
   `locale` are not exposed by `slack_user`.
 - The provider address is `pippiio.com/pippiio/slack`, a development address. Consuming it
