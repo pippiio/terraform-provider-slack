@@ -80,8 +80,8 @@ func (r *messageResource) Configure(_ context.Context, req resource.ConfigureReq
 
 	if !ok {
 		resp.Diagnostics.AddError(
-			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *hashicups.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+			"Unexpected Resource Configure Type",
+			fmt.Sprintf("Expected *slackclient.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
 		return
 	}
@@ -352,8 +352,12 @@ func (r *messageResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 		if err != nil {
 			resp.Diagnostics.AddError(
-				"Error Deleting HashiCups Order",
-				"Could not delete order, unexpected error: "+err.Error(),
+				"Error Deleting Slack Message",
+				fmt.Sprintf("Could not delete the message for %s (ts: %s): %s",
+					slackID,
+					v.(types.Object).Attributes()["ts"].(types.String).ValueString(),
+					err,
+				),
 			)
 			return
 		}

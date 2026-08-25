@@ -25,11 +25,11 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		// NOTE: This is not a typical Terraform Registry provider address,
-		// such as registry.terraform.io/hashicorp/hashicups. This specific
-		// provider address is used in these tutorials in conjunction with a
-		// specific Terraform CLI configuration for manual development testing
-		// of this provider.
+		// NOTE: this is a development provider address, not a Terraform Registry
+		// one. Consuming it requires a dev_overrides block or a filesystem mirror
+		// in the Terraform CLI configuration; it will not resolve from the public
+		// registry. Publishing to the Registry requires changing this to a
+		// registry.terraform.io/<namespace>/slack address.
 		Address: "pippiio.com/pippiio/slack",
 		Debug:   debug,
 	}
