@@ -161,8 +161,26 @@ func (r *messageResource) Read(ctx context.Context, req resource.ReadRequest, re
 		channel := v.(types.Object).Attributes()["channel"].(types.String).ValueString()
 		ts := v.(types.Object).Attributes()["ts"].(types.String).ValueString()
 		apiresp, err := r.client.ReadMessage(channel, ts)
-		if err != nil || apiresp.Err == "thread_not_found" {
+
+		switch classifyReadError(err) {
+		case readOutcomeDrop:
+			// The message is confirmed gone from Slack. Dropping it here surfaces the
+			// drift to Terraform, which recreates it on the next apply.
 			continue
+		case readOutcomeFail:
+			// We could not determine whether the message still exists. Leaving state
+			// untouched and failing is the safe outcome -- silently dropping the entry
+			// would destroy the record of a message that probably still exists.
+			resp.Diagnostics.AddError(
+				"Unable to read Slack message",
+				fmt.Sprintf(
+					"Could not read the message for %s (channel: %s, ts: %s): %s\n\n"+
+						"State has been left unchanged. Resolve the error above and run "+
+						"terraform refresh again.",
+					k, channel, ts, err,
+				),
+			)
+			return
 		}
 
 		channelValue := types.StringValue(apiresp.Channel)
