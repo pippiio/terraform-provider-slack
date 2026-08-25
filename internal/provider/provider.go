@@ -148,6 +148,7 @@ func (p *slackProvider) Configure(ctx context.Context, req provider.ConfigureReq
 func (p *slackProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewUserIdDataSource,
+		NewUserDataSource,
 	}
 }
 
