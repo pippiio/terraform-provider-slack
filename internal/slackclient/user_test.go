@@ -238,3 +238,29 @@ func TestGetUser_BothLookupsYieldIdenticalUser(t *testing.T) {
 		t.Errorf("email differs: %q vs %q", *a.Profile.Email, *b.Profile.Email)
 	}
 }
+
+// Defensive boundary: Slack answering ok:true with no user object must not yield a
+// silently empty user written into Terraform state.
+func TestGetUserByID_EmptyUserObjectIsAnError(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/users.info": raw(200, `{"ok":true}`),
+	})
+
+	u, err := c.GetUserByID("W012A3CDE")
+	if err == nil {
+		t.Fatalf("expected an error for a response with no user object, got %+v", u)
+	}
+	if u != nil {
+		t.Errorf("user = %+v, want nil", u)
+	}
+}
+
+func TestGetUserByEmail_EmptyUserObjectIsAnError(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/users.lookupByEmail": raw(200, `{"ok":true,"user":{}}`),
+	})
+
+	if _, err := c.GetUserByEmail("a@b.com"); err == nil {
+		t.Fatal("expected an error for an empty user object")
+	}
+}

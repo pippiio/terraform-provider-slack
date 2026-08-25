@@ -31,9 +31,9 @@ type MessageData struct {
 // doRequest issues req and returns the raw response body.
 //
 // It fails on three conditions, in order:
-//   1. transport failure           -> the underlying error
-//   2. non-200 HTTP status         -> a plain error naming the status
-//   3. HTTP 200 with ok:false      -> a *SlackError carrying Slack's error code
+//  1. transport failure           -> the underlying error
+//  2. non-200 HTTP status         -> a plain error naming the status
+//  3. HTTP 200 with ok:false      -> a *SlackError carrying Slack's error code
 //
 // The third case is the important one. The Slack Web API reports application-level
 // failures -- invalid auth, missing scope, unknown user, rate limiting -- as HTTP 200
@@ -233,6 +233,12 @@ func (c *Client) GetUserByID(userID string) (*User, error) {
 		return nil, err
 	}
 
+	// Slack should never answer ok:true without a user object, but decoding one would
+	// silently produce a user with an empty ID and write it to Terraform state.
+	if res.User.ID == "" {
+		return nil, fmt.Errorf("slack returned a successful response with no user object")
+	}
+
 	return &res.User, nil
 }
 
@@ -262,6 +268,12 @@ func (c *Client) GetUserByEmail(email string) (*User, error) {
 	res := userResponse{}
 	if err := json.Unmarshal(body, &res); err != nil {
 		return nil, err
+	}
+
+	// Slack should never answer ok:true without a user object, but decoding one would
+	// silently produce a user with an empty ID and write it to Terraform state.
+	if res.User.ID == "" {
+		return nil, fmt.Errorf("slack returned a successful response with no user object")
 	}
 
 	return &res.User, nil
