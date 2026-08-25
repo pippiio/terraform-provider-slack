@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "user": {
+    "id": "B023BCDE1",
+    "team_id": "T012AB3C4",
+    "name": "slackbot",
+    "deleted": false,
+    "real_name": "Slackbot",
+    "tz_offset": 0,
+    "profile": {
+      "real_name": "Slackbot",
+      "display_name": "Slackbot",
+      "bot_id": "B023BCDE1",
+      "api_app_id": "A012B3CDE",
+      "team": "T012AB3C4"
+    },
+    "is_bot": true,
+    "is_app_user": false,
+    "updated": 0
+  }
+}
