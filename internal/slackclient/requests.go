@@ -206,3 +206,63 @@ func (c *Client) ReadUserIds() (*UserReponse, error) {
 
 	return &res, nil
 }
+
+// GetUserByID looks a user up by Slack user ID via users.info.
+//
+// Requires the users:read scope. The users:read.email scope additionally governs
+// whether profile.email is present in the response; without it the field is omitted
+// rather than the call failing.
+func (c *Client) GetUserByID(userID string) (*User, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/api/users.info", c.Host), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
+
+	q := req.URL.Query()
+	q.Add("user", userID)
+	req.URL.RawQuery = q.Encode()
+
+	body, err := c.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	res := userResponse{}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, err
+	}
+
+	return &res.User, nil
+}
+
+// GetUserByEmail looks a user up by email address via users.lookupByEmail.
+//
+// Requires the users:read.email scope; without it Slack answers missing_scope, which
+// doRequest surfaces as a *SlackError so the caller can name the scope.
+//
+// Note this endpoint does not find deactivated accounts, whereas users.info returns
+// them with deleted:true. That asymmetry is Slack's.
+func (c *Client) GetUserByEmail(email string) (*User, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/api/users.lookupByEmail", c.Host), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
+
+	q := req.URL.Query()
+	q.Add("email", email)
+	req.URL.RawQuery = q.Encode()
+
+	body, err := c.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	res := userResponse{}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, err
+	}
+
+	return &res.User, nil
+}
