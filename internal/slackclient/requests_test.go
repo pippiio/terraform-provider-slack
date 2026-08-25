@@ -149,3 +149,81 @@ func TestDoRequest_NonJSONBodyPassesThrough(t *testing.T) {
 		t.Errorf("body = %q, want it passed through unchanged", body)
 	}
 }
+
+// --- NFR-3 / AC-12: every existing method must surface ok:false, not swallow it ---
+//
+// Testing doRequest alone does not prove its callers behave correctly once it starts
+// returning errors. These five cover the actual public methods.
+
+func TestSendMessage_OkFalseSurfacesError(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/chat.postMessage": fixture("err_invalid_auth.json"),
+	})
+
+	res, err := c.SendMessage("C123456789", "hello")
+	if err == nil {
+		t.Fatalf("expected error, got nil with res=%+v", res)
+	}
+	if res != nil {
+		t.Errorf("res = %+v, want nil on error", res)
+	}
+	if got := ErrorCode(err); got != "invalid_auth" {
+		t.Errorf("ErrorCode = %q, want invalid_auth", got)
+	}
+}
+
+func TestReadMessage_OkFalseSurfacesError(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/conversations.replies": fixture("err_thread_not_found.json"),
+	})
+
+	res, err := c.ReadMessage("C123456789", "1503435956.000247")
+	if err == nil {
+		t.Fatalf("expected error, got nil with res=%+v", res)
+	}
+	if got := ErrorCode(err); got != "thread_not_found" {
+		t.Errorf("ErrorCode = %q, want thread_not_found", got)
+	}
+}
+
+func TestUpdateMessage_OkFalseSurfacesError(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/chat.update": fixture("err_invalid_auth.json"),
+	})
+
+	res, err := c.UpdateMessage("C123456789", "1503435956.000247", "updated")
+	if err == nil {
+		t.Fatalf("expected error, got nil with res=%+v", res)
+	}
+	if got := ErrorCode(err); got != "invalid_auth" {
+		t.Errorf("ErrorCode = %q, want invalid_auth", got)
+	}
+}
+
+func TestDeleteMessage_OkFalseSurfacesError(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/chat.delete": fixture("err_invalid_auth.json"),
+	})
+
+	err := c.DeleteMessage("C123456789", "1503435956.000247")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if got := ErrorCode(err); got != "invalid_auth" {
+		t.Errorf("ErrorCode = %q, want invalid_auth", got)
+	}
+}
+
+func TestReadUserIds_OkFalseSurfacesError(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/users.list": fixture("err_missing_scope.json"),
+	})
+
+	res, err := c.ReadUserIds()
+	if err == nil {
+		t.Fatalf("expected error, got nil with res=%+v", res)
+	}
+	if got := ErrorCode(err); got != "missing_scope" {
+		t.Errorf("ErrorCode = %q, want missing_scope", got)
+	}
+}
