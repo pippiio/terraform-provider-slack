@@ -76,17 +76,12 @@ func (r *messageResource) Configure(_ context.Context, req resource.ConfigureReq
 		return
 	}
 
-	client, ok := req.ProviderData.(*slackclient.Client)
-
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *slackclient.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
-		)
+	clients := providerClientsFrom(req.ProviderData, "Resource", &resp.Diagnostics)
+	if clients == nil {
 		return
 	}
 
-	r.client = client
+	r.client = clients.Bot
 }
 
 func (r *messageResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {

@@ -73,7 +73,8 @@ func TestUserDataSourceConfigure_WrongTypeNamesSlackClient(t *testing.T) {
 	}
 }
 
-// A valid client must configure without a diagnostic.
+// A valid client container must configure without a diagnostic. The message resource
+// uses the bot client -- only user-group management needs the user token.
 func TestConfigure_AcceptsRealClient(t *testing.T) {
 	host, token := "https://slack.example", "xoxb-test"
 	c, err := slackclient.NewClient(&host, &token)
@@ -83,12 +84,14 @@ func TestConfigure_AcceptsRealClient(t *testing.T) {
 
 	r := &messageResource{}
 	resp := &resource.ConfigureResponse{}
-	r.Configure(context.Background(), resource.ConfigureRequest{ProviderData: c}, resp)
+	r.Configure(context.Background(), resource.ConfigureRequest{
+		ProviderData: &providerClients{Bot: c},
+	}, resp)
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("a valid client must configure cleanly: %v", resp.Diagnostics)
 	}
 	if r.client != c {
-		t.Error("client was not stored on the resource")
+		t.Error("bot client was not stored on the resource")
 	}
 }
 

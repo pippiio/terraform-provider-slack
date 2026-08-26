@@ -7,10 +7,13 @@ terraform {
   }
 }
 
-provider "slack" {
-  host  = "https://pippiio.com"
-  token = "xoxb-1234567890"
-}
+# host/token/user_token come from SLACK_HOST, SLACK_TOKEN and SLACK_USER_TOKEN so this
+# file carries no credentials.
+provider "slack" {}
+
+# ---------------------------------------------------------------------------
+# Existing surface
+# ---------------------------------------------------------------------------
 
 data "slack_user_ids" "this" {
   usernames = ["u1", "u2"]
@@ -21,7 +24,6 @@ resource "slack_message" "this" {
   slack_ids = toset(values(data.slack_user_ids.this.slack_ids))
 }
 
-# slack_user: single-user lookup by ID or email.
 data "slack_user" "by_id" {
   id = "W012A3CDE"
 }
@@ -30,15 +32,55 @@ data "slack_user" "by_email" {
   email = "spengler@ghostbusters.example.com"
 }
 
-output "user_by_id_display_name" {
-  value = data.slack_user.by_id.profile.display_name
+# ---------------------------------------------------------------------------
+# User groups
+#
+# Requires a PAID Slack plan, the usergroups:read + usergroups:write scopes, and a USER
+# token (SLACK_USER_TOKEN) for the resource. The data source needs only the bot token.
+#
+# NOTE: `terraform destroy` DISABLES a user group -- Slack has no delete -- and its handle
+# stays reserved afterwards. Re-applying adopts the disabled group and emits a warning.
+# ---------------------------------------------------------------------------
+
+# Read an existing group. Bot token is sufficient here.
+data "slack_usergroup" "existing" {
+  handle = "example-alpha"
 }
 
-output "user_by_email_id" {
-  value = data.slack_user.by_email.id
+# Slack-owned membership: `users` omitted, so the provider never touches it.
+resource "slack_usergroup" "smoke_no_members" {
+  name        = "draft smoke test"
+  handle      = "draft-smoke-test"
+  description = "Created by tf_test for manual verification. Safe to disable."
 }
 
-# Null rather than "" when the token lacks users:read.email.
-output "user_by_id_email" {
-  value = data.slack_user.by_id.profile.email
+# Terraform-owned membership. `users` must be non-empty when set -- omit it instead to
+# leave membership to Slack.
+resource "slack_usergroup" "smoke_with_members" {
+  name        = "draft smoke test members"
+  handle      = "draft-smoke-test-members"
+  description = "Membership is authoritative: manual additions are removed on apply."
+
+  users = [data.slack_user.by_id.id]
+}
+
+output "existing_group_members" {
+  value = data.slack_usergroup.existing.users
+}
+
+output "smoke_group_id" {
+  value = slack_usergroup.smoke_no_members.id
+}
+
+output "smoke_group_disabled" {
+  value = slack_usergroup.smoke_no_members.is_disabled
+}
+
+# Groups synced from an identity provider own their own membership -- setting `users` on
+# one is refused with a diagnostic.
+output "existing_membership_externally_owned" {
+  value = (
+    data.slack_usergroup.existing.is_idp_group ||
+    data.slack_usergroup.existing.is_membership_locked
+  )
 }

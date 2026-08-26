@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 )
 
 // dataSourceTypeNames returns the Terraform type name of every registered data source.
@@ -53,4 +54,41 @@ func TestProvider_StillRegistersUserIdsDataSource(t *testing.T) {
 	if !found {
 		t.Errorf("slack_user_ids must remain registered; got %v", names)
 	}
+}
+
+// resourceTypeNames returns the Terraform type name of every registered resource.
+func resourceTypeNames(t *testing.T) []string {
+	t.Helper()
+	ctx := context.Background()
+	p := &slackProvider{version: "test"}
+
+	var names []string
+	for _, factory := range p.Resources(ctx) {
+		r := factory()
+		resp := &resource.MetadataResponse{}
+		r.Metadata(ctx, resource.MetadataRequest{ProviderTypeName: "slack"}, resp)
+		names = append(names, resp.TypeName)
+	}
+	return names
+}
+
+func TestProvider_RegistersUserGroupResource(t *testing.T) {
+	names := resourceTypeNames(t)
+	for _, n := range names {
+		if n == "slack_usergroup" {
+			return
+		}
+	}
+	t.Errorf("slack_usergroup is not registered; got %v", names)
+}
+
+// AC-12: the existing resource must keep working.
+func TestProvider_StillRegistersMessageResource(t *testing.T) {
+	names := resourceTypeNames(t)
+	for _, n := range names {
+		if n == "slack_message" {
+			return
+		}
+	}
+	t.Errorf("slack_message must remain registered; got %v", names)
 }

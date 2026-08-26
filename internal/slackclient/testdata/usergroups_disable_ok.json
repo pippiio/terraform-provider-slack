@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "usergroup": {
+    "id": "S0615G0KT",
+    "team_id": "T060RNRCH",
+    "is_usergroup": true,
+    "name": "Marketing Team",
+    "handle": "marketing-team",
+    "date_create": 1446746793,
+    "date_update": 1446747767,
+    "date_delete": 1446747767,
+    "deleted_by": "U060RNRCZ",
+    "prefs": { "channels": [], "groups": [] },
+    "user_count": 0
+  }
+}

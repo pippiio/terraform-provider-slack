@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "usergroup": {
+    "id": "S0615G0KT",
+    "team_id": "T060RNRCH",
+    "is_usergroup": true,
+    "name": "Marketing Team",
+    "description": "Marketing gurus, PR experts and product advocates.",
+    "handle": "marketing-team",
+    "date_create": 1446746793,
+    "date_update": 1446747767,
+    "date_delete": 0,
+    "prefs": { "channels": ["C0611AAAA"], "groups": [] },
+    "users": ["U060RNRCZ", "U060ULRC0"],
+    "user_count": 2
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "usergroups": [
+    {
+      "id": "S0615G0KT",
+      "team_id": "T060RNRCH",
+      "is_usergroup": true,
+      "name": "Marketing Team",
+      "description": "No prefs key at all -- exercises FR-9a carry-forward.",
+      "handle": "marketing-team",
+      "date_create": 1446746793,
+      "date_update": 1446746793,
+      "date_delete": 0,
+      "users": ["U060RNRCZ"],
+      "user_count": 1
+    }
+  ]
+}

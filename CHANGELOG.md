@@ -29,6 +29,35 @@ becoming visible, not a new fault. Expect to see errors from:
 
 ### Added
 
+- **`user_token` provider attribute** (`SLACK_USER_TOKEN`) — an optional Slack **user**
+  token (`xoxp-…`) alongside the bot token. Required only to *manage* user groups: Slack
+  refuses `usergroups.create` for bot tokens in workspaces that restrict who may manage
+  user groups, answering `permission_denied` rather than a missing-scope error. Every
+  other part of the provider, including the `slack_usergroup` data source, continues to
+  use the bot token alone.
+
+- **`slack_usergroup` resource and data source** — manage Slack user groups (`@mention`
+  groups) with name, handle, description, default channels and membership.
+  - **The resource requires `user_token`**; the data source does not. Configuring the
+    resource without one fails at plan time with a diagnostic showing exactly what to set.
+  - **Requires a paid Slack plan.** User groups are unavailable on the free plan, where
+    every `usergroups.*` call fails with `paid_only`. Requires `usergroups:read` and
+    `usergroups:write`. Slack additionally gates group *creation* on a workspace setting,
+    so a correctly-scoped token can still be refused with `permission_denied`.
+  - **`terraform destroy` disables a group rather than deleting it.** Slack provides no
+    delete for user groups, and a disabled group keeps its name and handle **reserved**.
+    Re-creating a group with the same handle re-enables and adopts the disabled one, which
+    is reported as a warning. Creating against an *active* handle fails instead, rather
+    than silently taking over a group Terraform did not create.
+  - **`users` is authoritative.** Slack offers only a replace operation for membership, so
+    anyone added to a managed group by hand is removed on the next apply — and Slack sends
+    no notification when that happens. **Omit `users`** to leave membership entirely to
+    Slack; the provider then never touches it.
+  - Groups synced from an identity provider (`is_idp_group`) or with membership locked
+    (`is_membership_locked`) refuse membership writes with an explanatory diagnostic. Both
+    flags are exposed so configuration can branch on them.
+  - The data source finds disabled groups too, by `id` or `handle`.
+
 - **`slack_user` data source** — looks up a single Slack user by `id` or `email` and
   exposes the full user object, including a nested `profile` block with display name,
   real name, title, phone, timezone, avatars, and account-status flags.

@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"os"
 
 	"terraform-provider-slack/internal/slackclient"
 
@@ -37,8 +36,9 @@ type slackProvider struct {
 }
 
 type slackProviderModel struct {
-	Host  types.String `tfsdk:"host"`
-	Token types.String `tfsdk:"token"`
+	Host      types.String `tfsdk:"host"`
+	Token     types.String `tfsdk:"token"`
+	UserToken types.String `tfsdk:"user_token"`
 }
 
 // Metadata returns the provider type name.
@@ -56,9 +56,21 @@ func (p *slackProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp
 				Optional:    true,
 			},
 			"token": schema.StringAttribute{
-				Description: "Bearer Token for Slack API. May also be provided via SLACK_TOKEN environment variable.",
+				Description: "Bot token for the Slack API (`xoxb-…`). May also be provided via the SLACK_TOKEN environment variable.",
 				Optional:    true,
 				Sensitive:   true,
+			},
+			"user_token": schema.StringAttribute{
+				Description: "User token for the Slack API (`xoxp-…`). May also be provided via the SLACK_USER_TOKEN " +
+					"environment variable.\n\n" +
+					"Only required for **managing user groups** with the `slack_usergroup` resource: Slack refuses " +
+					"`usergroups.create` for bot tokens in workspaces that restrict who may manage user groups, " +
+					"answering `permission_denied`. Everything else in this provider — including the " +
+					"`slack_usergroup` data source — works with the bot token alone.\n\n" +
+					"The user token needs the `usergroups:write` scope and must belong to someone permitted to " +
+					"manage user groups in the workspace.",
+				Optional:  true,
+				Sensitive: true,
 			},
 		},
 	}
@@ -95,16 +107,9 @@ func (p *slackProvider) Configure(ctx context.Context, req provider.ConfigureReq
 		return
 	}
 
-	host := os.Getenv("SLACK_HOST")
-	token := os.Getenv("SLACK_TOKEN")
-
-	if !config.Host.IsNull() {
-		host = config.Host.ValueString()
-	}
-
-	if !config.Token.IsNull() {
-		token = config.Token.ValueString()
-	}
+	host := resolveToken(config.Host, "SLACK_HOST")
+	token := resolveToken(config.Token, "SLACK_TOKEN")
+	userToken := resolveToken(config.UserToken, "SLACK_USER_TOKEN")
 
 	if host == "" {
 		resp.Diagnostics.AddAttributeError(
@@ -129,7 +134,7 @@ func (p *slackProvider) Configure(ctx context.Context, req provider.ConfigureReq
 		return
 	}
 
-	client, err := slackclient.NewClient(&host, &token)
+	botClient, err := slackclient.NewClient(&host, &token)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Unable to Create Slack API Client",
@@ -140,8 +145,25 @@ func (p *slackProvider) Configure(ctx context.Context, req provider.ConfigureReq
 		return
 	}
 
-	resp.DataSourceData = client
-	resp.ResourceData = client
+	clients := &providerClients{Bot: botClient}
+
+	// The user token is optional: only user-group management needs it. Resources that
+	// require it say so themselves rather than failing everyone here.
+	if userToken != "" {
+		userClient, err := slackclient.NewClient(&host, &userToken)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Unable to Create Slack User API Client",
+				"An unexpected error occurred when creating the Slack client for the user token.\n\n"+
+					"Slack Client Error: "+err.Error(),
+			)
+			return
+		}
+		clients.User = userClient
+	}
+
+	resp.DataSourceData = clients
+	resp.ResourceData = clients
 }
 
 // DataSources defines the data sources implemented in the provider.
@@ -149,6 +171,7 @@ func (p *slackProvider) DataSources(_ context.Context) []func() datasource.DataS
 	return []func() datasource.DataSource{
 		NewUserIdDataSource,
 		NewUserDataSource,
+		NewUserGroupDataSource,
 	}
 }
 
@@ -156,5 +179,6 @@ func (p *slackProvider) DataSources(_ context.Context) []func() datasource.DataS
 func (p *slackProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewMessageResource,
+		NewUserGroupResource,
 	}
 }
