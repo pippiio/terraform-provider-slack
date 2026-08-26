@@ -24,7 +24,7 @@ resource "slack_message" "this" {
 
 ### Required
 
-- `message` (String) Slack message to be sent
+- `message` (String, Sensitive) Slack message to be sent. Marked sensitive, so Terraform prints it as `(sensitive value)` in plan and apply output rather than echoing the text. Note that this hides it from *output only* -- the message is stored in plain text in Terraform state, which must still be treated as secret.
 - `slack_ids` (Set of String) Set of slackids to send the message to
 
 ### Read-Only

@@ -47,8 +47,12 @@ func (r *messageResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"message": schema.StringAttribute{
-				Description: "Slack message to be sent",
-				Required:    true,
+				Description: "Slack message to be sent. Marked sensitive, so Terraform prints it as " +
+					"`(sensitive value)` in plan and apply output rather than echoing the text. Note that " +
+					"this hides it from *output only* -- the message is stored in plain text in Terraform " +
+					"state, which must still be treated as secret.",
+				Required:  true,
+				Sensitive: true,
 			},
 			"slack_ids": schema.SetAttribute{
 				Description: "Set of slackids to send the message to",

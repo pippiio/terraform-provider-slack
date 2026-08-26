@@ -27,6 +27,18 @@ becoming visible, not a new fault. Expect to see errors from:
 - messages addressed to a channel the bot has not been invited to
 - rate limiting on large recipient sets (`ratelimited`) — the provider does not retry
 
+**`slack_message.message` is now marked sensitive.**
+
+Terraform prints it as `(sensitive value)` in plan and apply output instead of echoing
+the text. The message body is frequently not public — an onboarding announcement, an
+unreleased change — and it was previously rendered in full in every plan.
+
+**What this means for you:** you can no longer read the message diff in plan output. If a
+value derived from it feeds somewhere Terraform refuses to print sensitive data, wrap the
+consumer in [`nonsensitive()`](https://developer.hashicorp.com/terraform/language/functions/nonsensitive).
+This hides the text from **output only** — Terraform state still stores it in plain text
+and must be treated as secret.
+
 **A changed `message` is now reposted rather than edited in place.**
 
 `slack_message` previously sent the new text with `chat.update`. An edited message stays
@@ -58,6 +70,11 @@ received. The data source now fails and names every username it could not resolv
 error instead of quietly messaging a smaller audience. Correct or remove the username.
 
 ### Added
+
+- **`host` now defaults to `https://slack.com`** and no longer has to be configured.
+  Previously omitting it failed with "Missing Slack API Host". Set it only to reach Slack
+  through a proxy or to point the provider at a stub; an explicit value, or `SLACK_HOST`,
+  still wins.
 
 - **`user_token` provider attribute** (`SLACK_USER_TOKEN`) — an optional Slack **user**
   token (`xoxp-…`) alongside the bot token. Required only to *manage* user groups: Slack
