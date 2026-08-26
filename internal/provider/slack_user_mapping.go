@@ -48,11 +48,42 @@ func tfInt64(p *int64) types.Int64 {
 	return types.Int64Value(*p)
 }
 
+// profileFieldsToTF converts Slack's custom profile fields into a dynamically-keyed map.
+//
+// Three states are preserved: nil -> null ("Slack told us nothing"), empty -> empty map
+// ("this user has no custom fields"), populated -> a map keyed by Slack's field ID.
+func profileFieldsToTF(f slackclient.ProfileFields) (types.Map, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	elemType := types.ObjectType{AttrTypes: profileFieldAttrTypes()}
+
+	if f == nil {
+		return types.MapNull(elemType), diags
+	}
+
+	elems := make(map[string]attr.Value, len(f))
+	for id, field := range f {
+		obj, d := types.ObjectValue(profileFieldAttrTypes(), map[string]attr.Value{
+			"value": tfString(field.Value),
+			"alt":   tfString(field.Alt),
+		})
+		diags.Append(d...)
+		elems[id] = obj
+	}
+
+	m, d := types.MapValue(elemType, elems)
+	diags.Append(d...)
+	return m, diags
+}
+
 // userToModel maps a Slack user onto the data source schema.
 func userToModel(ctx context.Context, u *slackclient.User) (userDataSourceModel, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
 	p := u.Profile
+
+	fields, fieldDiags := profileFieldsToTF(p.Fields)
+	diags.Append(fieldDiags...)
+
 	profileObj, d := types.ObjectValue(profileAttrTypes(), map[string]attr.Value{
 		"real_name":               tfString(p.RealName),
 		"real_name_normalized":    tfString(p.RealNameNormalized),
@@ -80,6 +111,7 @@ func userToModel(ctx context.Context, u *slackclient.User) (userDataSourceModel,
 		"is_custom_image":         tfBool(p.IsCustomImage),
 		"bot_id":                  tfString(p.BotID),
 		"api_app_id":              tfString(p.APIAppID),
+		"fields":                  fields,
 	})
 	diags.Append(d...)
 

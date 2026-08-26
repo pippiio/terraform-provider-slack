@@ -24,11 +24,9 @@ var justifiedUserOmissions = map[string]string{
 	"locale":          "requires include_locale=true on the request, which this data source does not send.",
 }
 
-var justifiedProfileOmissions = map[string]string{
-	"fields": "tenant-defined custom profile fields. Slack returns {} when populated and [] when empty, " +
-		"so it needs a custom unmarshaller, and the arbitrary key/value shape does not map to a static " +
-		"Terraform schema. Tracked as spec Open Question 1.",
-}
+// Empty: every field in the recorded response is now exposed. profile.fields was the last
+// omission and is covered as a dynamically-keyed MapNestedAttribute.
+var justifiedProfileOmissions = map[string]string{}
 
 func schemaAttributeNames(t *testing.T) (top map[string]bool, profile map[string]bool) {
 	t.Helper()

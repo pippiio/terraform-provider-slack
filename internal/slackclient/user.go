@@ -20,6 +20,11 @@ package slackclient
 //
 // Fields Slack always returns (id, team_id, name) stay plain strings.
 
+import (
+	"bytes"
+	"encoding/json"
+)
+
 // userResponse is the envelope returned by users.info and users.lookupByEmail.
 type userResponse struct {
 	User User `json:"user"`
@@ -28,8 +33,6 @@ type userResponse struct {
 // User is a Slack user object.
 //
 // Deliberately omitted, per the track's Non-Goals:
-//   - profile.fields  (tenant-defined custom fields; Slack returns {} or [] depending
-//     on population, so it needs a custom unmarshaller)
 //   - enterprise_user (Enterprise Grid only)
 //   - locale          (requires include_locale=true)
 type User struct {
@@ -93,4 +96,49 @@ type Profile struct {
 
 	BotID    *string `json:"bot_id"`
 	APIAppID *string `json:"api_app_id"`
+
+	// Fields holds tenant-defined custom profile fields, keyed by Slack's field ID
+	// (e.g. "Xf0123456"). See ProfileFields for the decoding quirk.
+	Fields ProfileFields `json:"fields"`
+}
+
+// ProfileField is one custom profile field value.
+type ProfileField struct {
+	Value *string `json:"value"`
+	Alt   *string `json:"alt"`
+}
+
+// ProfileFields maps a Slack custom-profile-field ID to its value.
+//
+// Slack is inconsistent about how it represents this: an object when the user has custom
+// fields set, but an empty JSON *array* when they do not. Decoding straight into a
+// map[string]ProfileField therefore fails for every user without custom fields, which is
+// why this type exists.
+//
+// The three states are kept distinct:
+//   - key absent, or null -> nil          ("Slack told us nothing")
+//   - []                  -> empty map    ("this user has no custom fields")
+//   - {...}               -> populated map
+type ProfileFields map[string]ProfileField
+
+func (f *ProfileFields) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		*f = nil
+		return nil
+	}
+
+	// Slack's "no custom fields" representation. Treat any array as empty rather than
+	// erroring -- the array form never carries entries.
+	if trimmed[0] == '[' {
+		*f = ProfileFields{}
+		return nil
+	}
+
+	var m map[string]ProfileField
+	if err := json.Unmarshal(trimmed, &m); err != nil {
+		return err
+	}
+	*f = m
+	return nil
 }

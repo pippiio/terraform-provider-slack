@@ -41,3 +41,17 @@ resource "slack_message" "announcement" {
     if !u.is_bot && !u.deleted
   ])
 }
+
+# Custom profile fields are workspace-defined, so they are keyed by Slack's field ID
+# rather than named in the schema. Map IDs to labels with Slack's team.profile.get.
+output "team_custom_field" {
+  value = try(data.slack_user.by_id.profile.fields["Xf0123456"].value, null)
+}
+
+# Null when Slack omitted the key; an empty map when the user simply has none set.
+output "all_custom_fields" {
+  value = {
+    for id, field in coalesce(data.slack_user.by_id.profile.fields, {}) :
+    id => field.value
+  }
+}

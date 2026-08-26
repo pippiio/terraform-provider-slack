@@ -70,6 +70,15 @@ type userDataSourceModel struct {
 	Profile types.Object `tfsdk:"profile"`
 }
 
+// profileFieldAttrTypes is the shape of one custom profile field. The field IDs keying
+// the map are tenant-defined and cannot be enumerated, but this inner shape is stable.
+func profileFieldAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"value": types.StringType,
+		"alt":   types.StringType,
+	}
+}
+
 func profileAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"real_name":               types.StringType,
@@ -98,6 +107,7 @@ func profileAttrTypes() map[string]attr.Type {
 		"is_custom_image":         types.BoolType,
 		"bot_id":                  types.StringType,
 		"api_app_id":              types.StringType,
+		"fields":                  types.MapType{ElemType: types.ObjectType{AttrTypes: profileFieldAttrTypes()}},
 	}
 }
 
@@ -233,6 +243,20 @@ func (d *userDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 					"is_custom_image":         schema.BoolAttribute{Description: "True if the user uploaded a custom avatar.", Computed: true},
 					"bot_id":                  schema.StringAttribute{Description: "Bot ID, for bot users.", Computed: true},
 					"api_app_id":              schema.StringAttribute{Description: "App ID, for app users.", Computed: true},
+					"fields": schema.MapNestedAttribute{
+						Description: "Custom profile fields defined by the workspace, keyed by Slack's field ID " +
+							"(e.g. `Xf0123456`). The keys are workspace-specific, so they cannot be enumerated in " +
+							"the schema. Null if Slack did not return the field; an empty map if the user has no " +
+							"custom fields set. Field IDs can be mapped to human-readable labels with Slack's " +
+							"`team.profile.get` method.",
+						Computed: true,
+						NestedObject: schema.NestedAttributeObject{
+							Attributes: map[string]schema.Attribute{
+								"value": schema.StringAttribute{Description: "The field's value for this user.", Computed: true},
+								"alt":   schema.StringAttribute{Description: "Alternate representation, used by some field types (often empty).", Computed: true},
+							},
+						},
+					},
 				},
 			},
 		},

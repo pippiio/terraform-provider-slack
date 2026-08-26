@@ -264,3 +264,67 @@ func TestGetUserByEmail_EmptyUserObjectIsAnError(t *testing.T) {
 		t.Fatal("expected an error for an empty user object")
 	}
 }
+
+// --- profile.fields: custom (tenant-defined) profile fields ---
+//
+// Slack is inconsistent here: an object when the user has custom fields, an empty ARRAY
+// when they do not. A plain map[string]... unmarshal fails on the array form, which is
+// why ProfileFields carries a custom unmarshaller.
+
+func TestProfileFields_UnmarshalsObjectForm(t *testing.T) {
+	u := decodeUser(t, "users_info_with_excluded_fields.json")
+
+	if u.Profile.Fields == nil {
+		t.Fatal("Fields = nil, want a populated map")
+	}
+	f, ok := u.Profile.Fields["Xf0123456"]
+	if !ok {
+		t.Fatalf("missing field Xf0123456; got keys %v", u.Profile.Fields)
+	}
+	if f.Value == nil || *f.Value != "Platform" {
+		t.Errorf("Value = %v, want Platform", f.Value)
+	}
+	if f.Alt == nil || *f.Alt != "" {
+		t.Errorf("Alt = %v, want empty string (present but blank)", f.Alt)
+	}
+}
+
+// The array form must decode to an empty map, not an error and not nil -- Slack is
+// telling us "this user has no custom fields", which is different from "Slack did not
+// tell us about custom fields at all".
+func TestProfileFields_UnmarshalsEmptyArrayForm(t *testing.T) {
+	u := decodeUser(t, "users_info_empty_fields.json")
+
+	if u.Profile.Fields == nil {
+		t.Fatal("Fields = nil for the [] form, want an empty non-nil map")
+	}
+	if len(u.Profile.Fields) != 0 {
+		t.Errorf("len(Fields) = %d, want 0", len(u.Profile.Fields))
+	}
+}
+
+// Absent entirely -> nil, so the data source can render null.
+func TestProfileFields_AbsentIsNil(t *testing.T) {
+	u := decodeUser(t, "users_info_full.json")
+
+	if u.Profile.Fields != nil {
+		t.Errorf("Fields = %v, want nil when the response omits the key", u.Profile.Fields)
+	}
+}
+
+func TestProfileFields_ExplicitNullIsNil(t *testing.T) {
+	var p Profile
+	if err := json.Unmarshal([]byte(`{"fields": null}`), &p); err != nil {
+		t.Fatalf("unmarshalling null fields: %v", err)
+	}
+	if p.Fields != nil {
+		t.Errorf("Fields = %v, want nil for explicit null", p.Fields)
+	}
+}
+
+func TestProfileFields_MalformedIsAnError(t *testing.T) {
+	var p Profile
+	if err := json.Unmarshal([]byte(`{"fields": "not-an-object"}`), &p); err == nil {
+		t.Error("expected an error for a string in place of the fields object")
+	}
+}
