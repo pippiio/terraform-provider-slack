@@ -39,6 +39,10 @@ becoming visible, not a new fault. Expect to see errors from:
   - Without `users:read.email`, `profile.email` is `null` rather than an error; an
     *email lookup* without it fails with a diagnostic naming the scope to add.
   - Attributes Slack omits are `null`, not empty strings.
+  - Workspace-defined custom profile fields are exposed as `profile.fields`, a map keyed by
+    Slack's field ID with `value` and `alt` per entry. The keys are workspace-specific so
+    they cannot be enumerated in the schema; map them to labels with Slack's
+    `team.profile.get`. Null when Slack omits the key, an empty map when the user has none.
   - Note: `users.lookupByEmail` does not match deactivated accounts. Look those up by
     `id`, which returns them with `deleted = true`.
 
@@ -69,8 +73,7 @@ becoming visible, not a new fault. Expect to see errors from:
   `POST`. Verified against a live workspace: both currently succeed, so this is a latent
   correctness issue rather than a functional one. Slack's Web API is permissive here today
   and could tighten without notice.
-- Custom profile fields (`profile.fields`), `enterprise_user` (Enterprise Grid), and
-  `locale` are not exposed by `slack_user`.
+- `enterprise_user` (Enterprise Grid) and `locale` are not exposed by `slack_user`.
 - The provider address is `pippiio.com/pippiio/slack`, a development address. Consuming it
   requires a `dev_overrides` CLI configuration; it is not resolvable from the public
   Terraform Registry.
