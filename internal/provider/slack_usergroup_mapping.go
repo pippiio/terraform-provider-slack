@@ -179,3 +179,40 @@ func userGroupErrorDiagnostic(err error, action, identifier string) (string, str
 		)
 	}
 }
+
+// userGroupToDataSourceModel maps a group onto the read-only data source schema.
+// Unlike the resource mapping there is no prior state to carry forward: everything the
+// data source reports comes from this response.
+func userGroupToDataSourceModel(ctx context.Context, g *slackclient.UserGroup) (userGroupDataSourceModel, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	var channels types.Set
+	if g.Prefs != nil {
+		channels = stringsToSet(ctx, g.Prefs.Channels, &diags)
+	} else {
+		channels = types.SetNull(types.StringType)
+	}
+
+	description := types.StringNull()
+	if g.Description != nil {
+		description = types.StringValue(*g.Description)
+	}
+
+	return userGroupDataSourceModel{
+		ID:          types.StringValue(g.ID),
+		Handle:      types.StringValue(g.Handle),
+		Name:        types.StringValue(g.Name),
+		Description: description,
+		Channels:    channels,
+		Users:       stringsToSet(ctx, g.Users, &diags),
+
+		TeamID:             types.StringValue(g.TeamID),
+		UserCount:          types.Int64Value(g.UserCount.Int64()),
+		DateCreate:         types.Int64Value(derefInt64(g.DateCreate)),
+		DateUpdate:         types.Int64Value(derefInt64(g.DateUpdate)),
+		IsDisabled:         types.BoolValue(g.IsDisabled()),
+		IsIDPGroup:         types.BoolValue(derefBool(g.IsIDPGroup)),
+		IsMembershipLocked: types.BoolValue(derefBool(g.IsMembershipLocked)),
+		IsExternal:         types.BoolValue(derefBool(g.IsExternal)),
+	}, diags
+}

@@ -149,6 +149,7 @@ func (p *slackProvider) DataSources(_ context.Context) []func() datasource.DataS
 	return []func() datasource.DataSource{
 		NewUserIdDataSource,
 		NewUserDataSource,
+		NewUserGroupDataSource,
 	}
 }
 
