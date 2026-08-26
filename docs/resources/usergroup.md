@@ -26,8 +26,12 @@ Requires the `usergroups:read` and `usergroups:write` scopes. Note that Slack al
 # On the free plan every usergroups API call fails with `paid_only`, and this resource
 # cannot be used at all. Requires the `usergroups:read` and `usergroups:write` scopes.
 #
-# Note also that Slack workspaces can restrict who may create user groups. A correctly
-# scoped token may still be refused with `permission_denied`.
+# This resource also requires a USER token (xoxp-) on the provider, not just a bot token:
+# Slack refuses usergroups.create for bot tokens in workspaces that restrict who may
+# manage user groups, answering `permission_denied`. Set `user_token` on the provider or
+# the SLACK_USER_TOKEN environment variable.
+#
+# Reading groups needs only the bot token -- the slack_usergroup data source is unaffected.
 
 # Authoritative membership: Terraform owns who is in the group.
 resource "slack_usergroup" "engineering" {

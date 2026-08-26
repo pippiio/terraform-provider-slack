@@ -21,8 +21,30 @@ terraform {
 }
 
 provider "slack" {
-  host  = "https://pippiio.com"
-  token = "xoxb-1234567890"
+  host = "https://slack.com"
+
+  # Bot token (xoxb-). Used by everything except user group management.
+  # May also be supplied via SLACK_TOKEN.
+  token = var.slack_bot_token
+
+  # User token (xoxp-). OPTIONAL, and only needed to *manage* user groups with the
+  # slack_usergroup resource: Slack refuses usergroups.create for bot tokens in
+  # workspaces that restrict who may manage user groups, answering permission_denied.
+  #
+  # Reading user groups works with the bot token, so the slack_usergroup data source
+  # does not need this. May also be supplied via SLACK_USER_TOKEN.
+  user_token = var.slack_user_token
+}
+
+variable "slack_bot_token" {
+  type      = string
+  sensitive = true
+}
+
+variable "slack_user_token" {
+  type      = string
+  sensitive = true
+  default   = null
 }
 ```
 
@@ -32,4 +54,9 @@ provider "slack" {
 ### Optional
 
 - `host` (String) URI for Slack API. May also be provided via SLACK_HOST environment variable.
-- `token` (String, Sensitive) Bearer Token for Slack API. May also be provided via SLACK_TOKEN environment variable.
+- `token` (String, Sensitive) Bot token for the Slack API (`xoxb-…`). May also be provided via the SLACK_TOKEN environment variable.
+- `user_token` (String, Sensitive) User token for the Slack API (`xoxp-…`). May also be provided via the SLACK_USER_TOKEN environment variable.
+
+Only required for **managing user groups** with the `slack_usergroup` resource: Slack refuses `usergroups.create` for bot tokens in workspaces that restrict who may manage user groups, answering `permission_denied`. Everything else in this provider — including the `slack_usergroup` data source — works with the bot token alone.
+
+The user token needs the `usergroups:write` scope and must belong to someone permitted to manage user groups in the workspace.
