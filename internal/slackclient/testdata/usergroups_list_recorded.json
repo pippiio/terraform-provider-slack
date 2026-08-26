@@ -1,0 +1,110 @@
+{
+  "ok": true,
+  "usergroups": [
+    {
+      "id": "S0615G0KT",
+      "team_id": "T060RNRCH",
+      "is_usergroup": true,
+      "is_subteam": true,
+      "name": "Example Alpha Team",
+      "description": "Synthetic fixture derived from a live usergroups.list response shape.",
+      "handle": "example-alpha",
+      "is_external": false,
+      "date_create": 1668001418,
+      "date_update": 1723026213,
+      "date_delete": 0,
+      "auto_type": null,
+      "auto_provision": false,
+      "enterprise_subteam_id": "",
+      "created_by": "U060RNRCZ",
+      "updated_by": "U060RNRCZ",
+      "deleted_by": null,
+      "is_section": false,
+      "is_editing_restricted": false,
+      "is_membership_locked": false,
+      "is_idp_group": false,
+      "is_visible": true,
+      "is_org_level": false,
+      "prefs": {
+        "channels": [
+          "C0611AAAA"
+        ],
+        "groups": []
+      },
+      "users": [
+        "U060RNRCZ",
+        "U060ULRC0"
+      ],
+      "user_count": 2,
+      "channel_count": 1
+    },
+    {
+      "id": "S06MMAAAA",
+      "team_id": "T060RNRCH",
+      "is_usergroup": true,
+      "is_subteam": true,
+      "name": "Example Retired Team",
+      "description": "Disabled group -- Slack has no delete, so date_delete is non-zero.",
+      "handle": "example-retired",
+      "is_external": false,
+      "date_create": 1668001418,
+      "date_update": 1723026213,
+      "date_delete": 1446746800,
+      "auto_type": null,
+      "auto_provision": false,
+      "enterprise_subteam_id": "",
+      "created_by": "U060RNRCZ",
+      "updated_by": "U060RNRCZ",
+      "deleted_by": "U060RNRCZ",
+      "is_section": false,
+      "is_editing_restricted": false,
+      "is_membership_locked": false,
+      "is_idp_group": false,
+      "is_visible": true,
+      "is_org_level": false,
+      "prefs": {
+        "channels": [],
+        "groups": []
+      },
+      "users": [],
+      "user_count": 0,
+      "channel_count": 0
+    },
+    {
+      "id": "S07IDPAAA",
+      "team_id": "T060RNRCH",
+      "is_usergroup": true,
+      "is_subteam": true,
+      "name": "Example SSO Team",
+      "description": "Synced from an identity provider; membership is not ours to manage.",
+      "handle": "example-sso",
+      "is_external": false,
+      "date_create": 1668001418,
+      "date_update": 1723026213,
+      "date_delete": 0,
+      "auto_type": null,
+      "auto_provision": true,
+      "enterprise_subteam_id": "",
+      "created_by": "U060RNRCZ",
+      "updated_by": "U060RNRCZ",
+      "deleted_by": null,
+      "is_section": false,
+      "is_editing_restricted": false,
+      "is_membership_locked": true,
+      "is_idp_group": true,
+      "is_visible": true,
+      "is_org_level": false,
+      "prefs": {
+        "channels": [
+          "C0611AAAA"
+        ],
+        "groups": []
+      },
+      "users": [
+        "U060RNRCZ"
+      ],
+      "user_count": 1,
+      "channel_count": 1
+    }
+  ]
+}
