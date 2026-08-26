@@ -193,3 +193,35 @@ func TestUserGroupDelete_DisablesRatherThanDeletes(t *testing.T) {
 		t.Fatalf("delete should succeed via usergroups.disable: %v", resp.Diagnostics)
 	}
 }
+
+// Review finding: on the adopt path the group handed to applyMembership comes from
+// usergroups.update, whose response may omit is_idp_group / is_membership_locked. The
+// flags we can trust come from usergroups.list. If the thin response wins, an IdP-synced
+// group looks manageable and the provider writes members it should refuse to touch.
+func TestUserGroupCreate_AdoptKeepsIDPFlagsFromListResponse(t *testing.T) {
+	// A disabled group that is ALSO IdP-synced and membership-locked.
+	listBody := `{"ok":true,"usergroups":[{
+		"id":"S07LOCKED","name":"Locked Team","handle":"locked-team",
+		"date_delete":1446746800,"is_idp_group":true,"is_membership_locked":true,
+		"prefs":{"channels":[],"groups":[]},"users":[],"user_count":0}]}`
+
+	// The update response is thin -- no flags, exactly the shape that hides the problem.
+	thinUpdate := `{"ok":true,"usergroup":{"id":"S07LOCKED","name":"Locked Team","handle":"locked-team","date_delete":0}}`
+
+	r := newUserGroupResource(t, map[string]stub{
+		"/api/usergroups.list":   raw(200, listBody),
+		"/api/usergroups.enable": raw(200, thinUpdate),
+		"/api/usergroups.update": raw(200, thinUpdate),
+		// usergroups.users.update deliberately unrouted: reaching it means we failed.
+	})
+
+	resp := createUserGroup(t, r, userGroupPlan(t, r, "Locked Team", "locked-team", []string{"U060RNRCZ"}))
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("adopting an IdP-synced group and writing members must be refused")
+	}
+	detail := resp.Diagnostics.Errors()[0].Detail()
+	if !strings.Contains(strings.ToLower(detail), "identity provider") {
+		t.Errorf("diagnostic should name the IdP ownership, not a generic Slack error; got: %s", detail)
+	}
+}

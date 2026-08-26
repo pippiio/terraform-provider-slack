@@ -216,3 +216,22 @@ func userGroupToDataSourceModel(ctx context.Context, g *slackclient.UserGroup) (
 		IsExternal:         types.BoolValue(derefBool(g.IsExternal)),
 	}, diags
 }
+
+// carryManageabilityFlags copies the membership-ownership flags from a richer source
+// onto a response that omitted them.
+//
+// usergroups.update returns less than usergroups.list. If is_idp_group or
+// is_membership_locked are missing there, MembershipIsManageable would read nil as
+// "manageable" and the provider would write members to a group owned by an identity
+// provider. Absence must not be mistaken for permission.
+func carryManageabilityFlags(from, to *slackclient.UserGroup) {
+	if from == nil || to == nil {
+		return
+	}
+	if to.IsIDPGroup == nil {
+		to.IsIDPGroup = from.IsIDPGroup
+	}
+	if to.IsMembershipLocked == nil {
+		to.IsMembershipLocked = from.IsMembershipLocked
+	}
+}

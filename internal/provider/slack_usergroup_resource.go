@@ -277,6 +277,13 @@ func (r *userGroupResource) Create(ctx context.Context, req resource.CreateReque
 				Description: &desc,
 				Channels:    channels,
 			})
+			// usergroups.update returns a thinner object than usergroups.list and may omit
+			// is_idp_group / is_membership_locked. Those flags decide whether membership is
+			// ours to write at all, so carry forward what the list told us rather than
+			// letting an absent field read as "manageable".
+			if group != nil {
+				carryManageabilityFlags(existing, group)
+			}
 		}
 
 	default:
