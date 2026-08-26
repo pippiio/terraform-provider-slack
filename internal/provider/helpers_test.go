@@ -49,6 +49,18 @@ func (c *callRecorder) add(v recordedCall) {
 	c.calls = append(c.calls, v)
 }
 
+// paths returns the endpoint path of every recorded call, in arrival order. Order is
+// the point for reposting: the delete must land before the new message is posted.
+func (c *callRecorder) paths() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, 0, len(c.calls))
+	for _, call := range c.calls {
+		out = append(out, call.Path)
+	}
+	return out
+}
+
 // callsTo returns every recorded call to the given endpoint path, in arrival order.
 func (c *callRecorder) callsTo(path string) []recordedCall {
 	c.mu.Lock()

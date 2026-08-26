@@ -27,6 +27,25 @@ becoming visible, not a new fault. Expect to see errors from:
 - messages addressed to a channel the bot has not been invited to
 - rate limiting on large recipient sets (`ratelimited`) — the provider does not retry
 
+**A changed `message` is now reposted rather than edited in place.**
+
+`slack_message` previously sent the new text with `chat.update`. An edited message stays
+exactly where it sits in the conversation, so a recipient who has scrolled past never sees
+it — and the call fails outright with `message_not_found` once the original message has
+been deleted, leaving every subsequent apply stuck on the same error with no way forward.
+
+Updating `message` now deletes the old message and posts a replacement, so it arrives as
+the most recent message in the conversation. A delete that reports the message as already
+gone counts as success, so a configuration wedged by the error above repairs itself on the
+next apply.
+
+**What this means for you:**
+
+- editing `message` **re-notifies every recipient** — it is a new message, not an edit
+- the `ts` in `msg_map` changes on every text change
+- if someone replied in a thread on the old message, that thread stays with the deleted
+  message; it does not move to the replacement
+
 **`slack_user_ids` now fails on a username it cannot resolve.**
 
 Previously a username with no matching Slack account was dropped from `slack_ids` in
