@@ -253,27 +253,10 @@ func (r *messageResource) Update(ctx context.Context, req resource.UpdateRequest
 		if planIDs[slackID] {
 			continue
 		}
-
-		attrs := state.Msg_map.Elements()[slackID].(types.Object).Attributes()
-		ts := attrs["ts"].(types.String).ValueString()
-		channel := attrs["channel"].(types.String).ValueString()
-
-		// Delete against the stored channel, not the map key. The key is the Slack ID
-		// the config named -- for a DM that is a user ID, and the message lives in the
-		// conversation Slack opened for it.
-		// A code that positively confirms the message is already gone is success, not
-		// failure: the desired end state holds either way. Anything else is real.
-		if err := r.client.DeleteMessage(channel, ts); err != nil && !messageGoneCodes[slackclient.ErrorCode(err)] {
-			// Discarding this error orphaned the message: it stayed in the workspace
-			// while the entry vanished from state, so nothing tracked it any more.
-			resp.Diagnostics.AddError(
-				"Error Deleting Slack Message",
-				fmt.Sprintf(
-					"Could not delete the message for %s (channel: %s, ts: %s): %s\n\n"+
-						"State has been left unchanged. The message may still exist in Slack.",
-					slackID, channel, ts, err,
-				),
-			)
+		// This error used to be discarded, which orphaned the message: it stayed in
+		// the workspace while the entry vanished from state, tracked by nothing.
+		resp.Diagnostics.Append(r.deleteStoredMessage(slackID, state.Msg_map.Elements()[slackID])...)
+		if resp.Diagnostics.HasError() {
 			return
 		}
 	}
@@ -366,18 +349,37 @@ func (r *messageResource) Delete(ctx context.Context, req resource.DeleteRequest
 	}
 
 	for slackID, v := range state.Msg_map.Elements() {
-		err := r.client.DeleteMessage(slackID, v.(types.Object).Attributes()["ts"].(types.String).ValueString())
-
-		if err != nil {
-			resp.Diagnostics.AddError(
-				"Error Deleting Slack Message",
-				fmt.Sprintf("Could not delete the message for %s (ts: %s): %s",
-					slackID,
-					v.(types.Object).Attributes()["ts"].(types.String).ValueString(),
-					err,
-				),
-			)
+		resp.Diagnostics.Append(r.deleteStoredMessage(slackID, v)...)
+		if resp.Diagnostics.HasError() {
 			return
 		}
 	}
+}
+
+// deleteStoredMessage deletes the message recorded in one msg_map entry.
+//
+// Two details are load-bearing. It targets the stored channel rather than the map
+// key: the key is the Slack ID the config named -- for a DM, a user ID -- while the
+// message lives in the conversation Slack opened for it. And a Slack code that
+// positively confirms the message is already gone counts as success, so a message
+// somebody deleted by hand cannot wedge every later apply and destroy.
+func (r *messageResource) deleteStoredMessage(slackID string, entry attr.Value) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	attrs := entry.(types.Object).Attributes()
+	ts := attrs["ts"].(types.String).ValueString()
+	channel := attrs["channel"].(types.String).ValueString()
+
+	if err := r.client.DeleteMessage(channel, ts); err != nil && !messageGoneCodes[slackclient.ErrorCode(err)] {
+		diags.AddError(
+			"Error Deleting Slack Message",
+			fmt.Sprintf(
+				"Could not delete the message for %s (channel: %s, ts: %s): %s\n\n"+
+					"State has been left unchanged. The message may still exist in Slack.",
+				slackID, channel, ts, err,
+			),
+		)
+	}
+
+	return diags
 }
