@@ -28,10 +28,12 @@ import (
 
 	"terraform-provider-slack/internal/slackclient"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -107,12 +109,22 @@ func (r *userGroupResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Optional:    true,
 			},
 			"users": schema.SetAttribute{
+				// Slack has no way to express "no members" through usergroups.users.update:
+				// an empty list arrives as a single empty-string element and is rejected with
+				// invalid_arguments and a regex complaint. Catching it at plan time turns that
+				// into an instruction. This is a provider-side constraint, not a Slack rule
+				// about minimum group size -- Slack was never observed to forbid empty groups.
+				Validators: []validator.Set{
+					setvalidator.SizeAtLeast(1),
+				},
 				Description: "Slack user IDs belonging to the group. **This attribute is authoritative**: " +
 					"Slack offers only a replace operation for membership, so anyone added to the group " +
 					"by hand in Slack is removed on the next apply, and Slack sends no notification when " +
 					"that happens. **Omit this attribute entirely** to let Slack own membership — the " +
 					"provider then never touches it. Cannot be used on groups synced from an identity " +
-					"provider or with membership locked.",
+					"provider or with membership locked.\n\n" +
+					"Must contain at least one user ID when set — Slack provides no way to express an " +
+					"empty group through its membership API. Omit the attribute entirely instead.",
 				ElementType: types.StringType,
 				Optional:    true,
 			},

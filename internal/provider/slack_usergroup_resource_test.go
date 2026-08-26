@@ -5,7 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 func newUserGroupResource(t *testing.T, rt map[string]stub) *userGroupResource {
@@ -132,5 +136,70 @@ func TestUserGroupDiagnostic_HandleConflictSuggestsImport(t *testing.T) {
 
 	if !strings.Contains(strings.ToLower(detail), "import") {
 		t.Errorf("a handle conflict should suggest terraform import; got: %s", detail)
+	}
+}
+
+// Q1 from the Phase 1 probe: sending an empty `users` list produces Slack's
+// invalid_arguments ("input must match regex ^[UW][A-Z0-9]{2,}$" on users/0) rather than
+// a useful message. A plan-time validator turns that into an instruction.
+//
+// Note what this does NOT claim: Slack was never shown to forbid zero-member groups. It
+// rejects an empty *string* as a user ID. The validator exists because the provider has
+// no way to express "no members" through usergroups.users.update, not because Slack
+// mandates a minimum.
+func TestUserGroupResource_UsersRejectsEmptySet(t *testing.T) {
+	attrs := userGroupSchema(t).Schema.Attributes
+
+	users, ok := attrs["users"].(interface {
+		SetValidators() []validator.Set
+	})
+	if !ok {
+		t.Fatal("users attribute exposes no set validators")
+	}
+	if len(users.SetValidators()) == 0 {
+		t.Fatal("users must carry a validator rejecting an empty set")
+	}
+
+	ctx := context.Background()
+	empty, diags := types.SetValue(types.StringType, []attr.Value{})
+	if diags.HasError() {
+		t.Fatalf("building empty set: %v", diags)
+	}
+
+	resp := &validator.SetResponse{}
+	users.SetValidators()[0].ValidateSet(ctx, validator.SetRequest{
+		Path:        path.Root("users"),
+		ConfigValue: empty,
+	}, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("an empty users set must be rejected at plan time")
+	}
+}
+
+// A non-empty set must pass, and a null one must pass too -- omitting `users` is the
+// supported way to leave membership to Slack (FR-8a).
+func TestUserGroupResource_UsersAcceptsNonEmptyAndNull(t *testing.T) {
+	attrs := userGroupSchema(t).Schema.Attributes
+	users := attrs["users"].(interface {
+		SetValidators() []validator.Set
+	})
+	ctx := context.Background()
+
+	populated, _ := types.SetValue(types.StringType, []attr.Value{types.StringValue("U012ABCDE")})
+	for name, v := range map[string]types.Set{
+		"populated": populated,
+		"null":      types.SetNull(types.StringType),
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := &validator.SetResponse{}
+			users.SetValidators()[0].ValidateSet(ctx, validator.SetRequest{
+				Path:        path.Root("users"),
+				ConfigValue: v,
+			}, resp)
+			if resp.Diagnostics.HasError() {
+				t.Errorf("%s set must be accepted: %v", name, resp.Diagnostics)
+			}
+		})
 	}
 }

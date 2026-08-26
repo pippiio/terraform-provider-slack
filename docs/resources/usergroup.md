@@ -96,6 +96,8 @@ output "engineering_disabled" {
 - `description` (String) Purpose of the group.
 - `users` (Set of String) Slack user IDs belonging to the group. **This attribute is authoritative**: Slack offers only a replace operation for membership, so anyone added to the group by hand in Slack is removed on the next apply, and Slack sends no notification when that happens. **Omit this attribute entirely** to let Slack own membership — the provider then never touches it. Cannot be used on groups synced from an identity provider or with membership locked.
 
+Must contain at least one user ID when set — Slack provides no way to express an empty group through its membership API. Omit the attribute entirely instead.
+
 ### Read-Only
 
 - `date_create` (Number) Unix timestamp when the group was created.
