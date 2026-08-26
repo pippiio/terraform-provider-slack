@@ -27,6 +27,17 @@ becoming visible, not a new fault. Expect to see errors from:
 - messages addressed to a channel the bot has not been invited to
 - rate limiting on large recipient sets (`ratelimited`) — the provider does not retry
 
+**`slack_user_ids` now fails on a username it cannot resolve.**
+
+Previously a username with no matching Slack account was dropped from `slack_ids` in
+silence. Because `slack_message` consumes that map as an authoritative set, the shrunken
+result made the next apply **delete the message already delivered to that user** — a typo,
+a renamed account, or a deactivated one was enough to destroy a message somebody had
+received. The data source now fails and names every username it could not resolve.
+
+**What this means for you:** a configuration listing a username that no longer exists will
+error instead of quietly messaging a smaller audience. Correct or remove the username.
+
 ### Added
 
 - **`user_token` provider attribute** (`SLACK_USER_TOKEN`) — an optional Slack **user**
@@ -86,15 +97,28 @@ becoming visible, not a new fault. Expect to see errors from:
   duplicates on the next apply. State is now dropped only when Slack positively confirms
   the message is gone (`thread_not_found`, `message_not_found`); anything else fails
   loudly and leaves state untouched.
+- Messages are deleted and edited against the channel Slack delivered them to, rather than
+  the Slack ID from configuration. `chat.delete` and `chat.update` were passed the
+  `msg_map` key — for a DM that is a user ID, not the conversation the message lives in —
+  so both targeted a channel that does not exist. `Read` already used the stored channel;
+  the write paths now agree with it.
+- A failed message delete is no longer discarded. `Update` ignored the error from
+  `chat.delete`, so a delete Slack refused still removed the entry from state: the message
+  stayed in the workspace with nothing tracking it. Both `Update` and `destroy` now report
+  the failure and stop.
+- A message already deleted by hand in Slack no longer wedges `apply` and `destroy`. The
+  error codes that positively confirm the message is gone count as success, since the
+  desired end state holds either way.
 - `terraform-plugin-docs` is now a proper tracked tool dependency. It was previously
   referenced only from `go:generate` comments, so `go mod tidy` would remove it and break
   documentation generation. Regenerating docs now requires `go generate -tags tools ./tools`.
 
 ### Unchanged
 
-- `slack_user_ids` behaviour is unchanged and pinned by tests. It does gain error
-  reporting from the fix above: a failing `users.list` call now surfaces instead of
-  silently returning an empty map.
+- `slack_user_ids` resolution is otherwise unchanged and pinned by tests, apart from the
+  unresolved-username failure described above. It also gains error reporting from the
+  `ok: false` fix: a failing `users.list` call now surfaces instead of silently returning
+  an empty map.
 
 ### Known issues
 
