@@ -127,15 +127,13 @@ func (d *userGroupDataSource) Configure(_ context.Context, req datasource.Config
 	if req.ProviderData == nil {
 		return
 	}
-	client, ok := req.ProviderData.(*slackclient.Client)
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *slackclient.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
-		)
+	clients := providerClientsFrom(req.ProviderData, "Data Source", &resp.Diagnostics)
+	if clients == nil {
 		return
 	}
-	d.client = client
+
+	// Reading user groups works with the bot token; only managing them needs the user token.
+	d.client = clients.Bot
 }
 
 func (d *userGroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {

@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 	"terraform-provider-slack/internal/slackclient"
 	"time"
 
@@ -113,15 +112,10 @@ func (d *userIdDataSource) Configure(_ context.Context, req datasource.Configure
 		return
 	}
 
-	client, ok := req.ProviderData.(*slackclient.Client)
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *slackclient.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
-		)
-
+	clients := providerClientsFrom(req.ProviderData, "Data Source", &resp.Diagnostics)
+	if clients == nil {
 		return
 	}
 
-	d.client = client
+	d.client = clients.Bot
 }

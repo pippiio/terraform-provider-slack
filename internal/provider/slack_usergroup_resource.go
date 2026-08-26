@@ -155,15 +155,18 @@ func (r *userGroupResource) Configure(_ context.Context, req resource.ConfigureR
 	if req.ProviderData == nil {
 		return
 	}
-	client, ok := req.ProviderData.(*slackclient.Client)
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *slackclient.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
-		)
+	clients := providerClientsFrom(req.ProviderData, "Resource", &resp.Diagnostics)
+	if clients == nil {
 		return
 	}
-	r.client = client
+
+	// Managing user groups requires a user token: Slack refuses usergroups.create for bot
+	// tokens in workspaces that restrict user group management.
+	userClient := requireUserClient(clients, &resp.Diagnostics)
+	if userClient == nil {
+		return
+	}
+	r.client = userClient
 }
 
 func (r *userGroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

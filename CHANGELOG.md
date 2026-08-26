@@ -29,8 +29,17 @@ becoming visible, not a new fault. Expect to see errors from:
 
 ### Added
 
+- **`user_token` provider attribute** (`SLACK_USER_TOKEN`) — an optional Slack **user**
+  token (`xoxp-…`) alongside the bot token. Required only to *manage* user groups: Slack
+  refuses `usergroups.create` for bot tokens in workspaces that restrict who may manage
+  user groups, answering `permission_denied` rather than a missing-scope error. Every
+  other part of the provider, including the `slack_usergroup` data source, continues to
+  use the bot token alone.
+
 - **`slack_usergroup` resource and data source** — manage Slack user groups (`@mention`
   groups) with name, handle, description, default channels and membership.
+  - **The resource requires `user_token`**; the data source does not. Configuring the
+    resource without one fails at plan time with a diagnostic showing exactly what to set.
   - **Requires a paid Slack plan.** User groups are unavailable on the free plan, where
     every `usergroups.*` call fails with `paid_only`. Requires `usergroups:read` and
     `usergroups:write`. Slack additionally gates group *creation* on a workspace setting,
