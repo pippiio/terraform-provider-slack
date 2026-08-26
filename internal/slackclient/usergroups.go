@@ -22,7 +22,10 @@ package slackclient
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"strconv"
+	"strings"
 )
 
 // UserGroup is a Slack user group (the API calls these "subteams").
@@ -154,4 +157,200 @@ type userGroupListResponse struct {
 
 type userGroupUsersResponse struct {
 	Users []string `json:"users"`
+}
+
+// --- client methods ---
+//
+// All follow the package's request template and route through doRequest, so Slack's
+// ok:false responses surface as *SlackError.
+
+// CreateUserGroupRequest describes a new user group.
+type CreateUserGroupRequest struct {
+	Name        string
+	Handle      string
+	Description string
+	Channels    []string
+}
+
+// UpdateUserGroupRequest describes a change to an existing group. Nil pointers mean
+// "leave unchanged" — Slack treats an omitted parameter as no-op, but an empty string
+// as a request to clear the value, so the distinction matters.
+type UpdateUserGroupRequest struct {
+	ID          string
+	Name        *string
+	Handle      *string
+	Description *string
+	// Channels nil means leave unchanged; a non-nil empty slice clears the list.
+	Channels []string
+}
+
+// newUserGroupRequest builds a POST with bearer auth and the given query params.
+func (c *Client) newUserGroupRequest(endpoint string, params map[string]string) (*http.Request, error) {
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/%s", c.Host, endpoint), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
+
+	q := req.URL.Query()
+	for k, v := range params {
+		q.Add(k, v)
+	}
+	req.URL.RawQuery = q.Encode()
+	return req, nil
+}
+
+// decodeUserGroup runs a request and decodes the {"usergroup": {...}} envelope.
+func (c *Client) decodeUserGroup(req *http.Request) (*UserGroup, error) {
+	body, err := c.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	res := userGroupResponse{}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, err
+	}
+	return &res.UserGroup, nil
+}
+
+// CreateUserGroup creates a user group via usergroups.create.
+//
+// Requires usergroups:write. Slack also gates group creation on a workspace setting, so
+// a correctly-scoped token can still receive permission_denied.
+func (c *Client) CreateUserGroup(in CreateUserGroupRequest) (*UserGroup, error) {
+	params := map[string]string{
+		"name":   in.Name,
+		"handle": in.Handle,
+	}
+	if in.Description != "" {
+		params["description"] = in.Description
+	}
+	if len(in.Channels) > 0 {
+		params["channels"] = strings.Join(in.Channels, ",")
+	}
+
+	req, err := c.newUserGroupRequest("usergroups.create", params)
+	if err != nil {
+		return nil, err
+	}
+	return c.decodeUserGroup(req)
+}
+
+// UpdateUserGroup updates a group's metadata via usergroups.update.
+func (c *Client) UpdateUserGroup(in UpdateUserGroupRequest) (*UserGroup, error) {
+	params := map[string]string{"usergroup": in.ID}
+	if in.Name != nil {
+		params["name"] = *in.Name
+	}
+	if in.Handle != nil {
+		params["handle"] = *in.Handle
+	}
+	if in.Description != nil {
+		params["description"] = *in.Description
+	}
+	if in.Channels != nil {
+		params["channels"] = strings.Join(in.Channels, ",")
+	}
+
+	req, err := c.newUserGroupRequest("usergroups.update", params)
+	if err != nil {
+		return nil, err
+	}
+	return c.decodeUserGroup(req)
+}
+
+// ListUserGroups lists the workspace's user groups.
+//
+// includeDisabled matters: Slack has no delete, so a "removed" group is merely disabled
+// and is invisible without it. Adopt-on-create depends on seeing those.
+func (c *Client) ListUserGroups(includeUsers, includeDisabled bool) ([]UserGroup, error) {
+	params := map[string]string{
+		"include_users":    strconv.FormatBool(includeUsers),
+		"include_disabled": strconv.FormatBool(includeDisabled),
+		"include_count":    "true",
+	}
+
+	req, err := c.newUserGroupRequest("usergroups.list", params)
+	if err != nil {
+		return nil, err
+	}
+	body, err := c.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	res := userGroupListResponse{}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, err
+	}
+	return res.UserGroups, nil
+}
+
+// FindUserGroupByHandle returns the group with the given handle, or nil if none exists.
+//
+// Disabled groups are included deliberately: their handles stay reserved, so a disabled
+// group is exactly what blocks a create and what adopt-on-create needs to find.
+func (c *Client) FindUserGroupByHandle(handle string) (*UserGroup, error) {
+	groups, err := c.ListUserGroups(true, true)
+	if err != nil {
+		return nil, err
+	}
+	for i := range groups {
+		if groups[i].Handle == handle {
+			return &groups[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// DisableUserGroup disables a group via usergroups.disable.
+//
+// This is the closest Slack offers to deletion. The group persists, and its name and
+// handle remain reserved.
+func (c *Client) DisableUserGroup(id string) (*UserGroup, error) {
+	req, err := c.newUserGroupRequest("usergroups.disable", map[string]string{"usergroup": id})
+	if err != nil {
+		return nil, err
+	}
+	return c.decodeUserGroup(req)
+}
+
+// EnableUserGroup re-enables a disabled group via usergroups.enable.
+func (c *Client) EnableUserGroup(id string) (*UserGroup, error) {
+	req, err := c.newUserGroupRequest("usergroups.enable", map[string]string{"usergroup": id})
+	if err != nil {
+		return nil, err
+	}
+	return c.decodeUserGroup(req)
+}
+
+// UpdateUserGroupUsers replaces the group's entire member list.
+//
+// Slack offers no add/remove — only replace — which is why the Terraform resource is
+// authoritative over membership.
+func (c *Client) UpdateUserGroupUsers(id string, userIDs []string) (*UserGroup, error) {
+	req, err := c.newUserGroupRequest("usergroups.users.update", map[string]string{
+		"usergroup": id,
+		"users":     strings.Join(userIDs, ","),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return c.decodeUserGroup(req)
+}
+
+// ListUserGroupUsers returns the group's current member IDs.
+func (c *Client) ListUserGroupUsers(id string) ([]string, error) {
+	req, err := c.newUserGroupRequest("usergroups.users.list", map[string]string{"usergroup": id})
+	if err != nil {
+		return nil, err
+	}
+	body, err := c.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	res := userGroupUsersResponse{}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, err
+	}
+	return res.Users, nil
 }

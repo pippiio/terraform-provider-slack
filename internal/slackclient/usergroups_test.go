@@ -2,6 +2,7 @@ package slackclient
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 )
 
@@ -161,4 +162,228 @@ func TestUserGroup_RecordedDisabledGroup(t *testing.T) {
 	if !groups[1].IsDisabled() {
 		t.Error("disabled group reported as active")
 	}
+}
+
+// --- client methods ---
+
+func TestCreateUserGroup_SendsAllFields(t *testing.T) {
+	c, rec := newTestClient(t, routes{"/api/usergroups.create": fixture("usergroups_create_ok.json")})
+
+	g, err := c.CreateUserGroup(CreateUserGroupRequest{
+		Name:        "Marketing Team",
+		Handle:      "marketing-team",
+		Description: "Marketing gurus.",
+		Channels:    []string{"C0611AAAA", "C0611BBBB"},
+	})
+	if err != nil {
+		t.Fatalf("CreateUserGroup: %v", err)
+	}
+	if g.ID != "S0615G0KT" {
+		t.Errorf("ID = %q, want S0615G0KT", g.ID)
+	}
+
+	req := rec.last()
+	if req.Path != "/api/usergroups.create" {
+		t.Errorf("path = %q", req.Path)
+	}
+	if req.Method != http.MethodPost {
+		t.Errorf("method = %q, want POST (create is a mutation)", req.Method)
+	}
+	if got := req.Query.Get("name"); got != "Marketing Team" {
+		t.Errorf("name = %q", got)
+	}
+	if got := req.Query.Get("handle"); got != "marketing-team" {
+		t.Errorf("handle = %q", got)
+	}
+	if got := req.Query.Get("description"); got != "Marketing gurus." {
+		t.Errorf("description = %q", got)
+	}
+	if got := req.Query.Get("channels"); got != "C0611AAAA,C0611BBBB" {
+		t.Errorf("channels = %q, want a comma-separated list", got)
+	}
+}
+
+func TestCreateUserGroup_OmitsEmptyOptionalFields(t *testing.T) {
+	c, rec := newTestClient(t, routes{"/api/usergroups.create": fixture("usergroups_create_ok.json")})
+
+	if _, err := c.CreateUserGroup(CreateUserGroupRequest{Name: "N", Handle: "h"}); err != nil {
+		t.Fatalf("CreateUserGroup: %v", err)
+	}
+	q := rec.last().Query
+	if _, present := q["description"]; present {
+		t.Error("empty description should not be sent")
+	}
+	if _, present := q["channels"]; present {
+		t.Error("empty channels should not be sent")
+	}
+}
+
+func TestListUserGroups_SendsIncludeFlags(t *testing.T) {
+	c, rec := newTestClient(t, routes{"/api/usergroups.list": fixture("usergroups_list_recorded.json")})
+
+	groups, err := c.ListUserGroups(true, true)
+	if err != nil {
+		t.Fatalf("ListUserGroups: %v", err)
+	}
+	if len(groups) != 3 {
+		t.Fatalf("len = %d, want 3", len(groups))
+	}
+	q := rec.last().Query
+	if q.Get("include_users") != "true" {
+		t.Errorf("include_users = %q, want true", q.Get("include_users"))
+	}
+	if q.Get("include_disabled") != "true" {
+		t.Errorf("include_disabled = %q, want true", q.Get("include_disabled"))
+	}
+}
+
+// FR-3's adopt branch needs to find a group by handle, including disabled ones.
+func TestFindUserGroupByHandle(t *testing.T) {
+	c, _ := newTestClient(t, routes{"/api/usergroups.list": fixture("usergroups_list_recorded.json")})
+
+	found, err := c.FindUserGroupByHandle("example-retired")
+	if err != nil {
+		t.Fatalf("FindUserGroupByHandle: %v", err)
+	}
+	if found == nil {
+		t.Fatal("disabled group not found -- adopt-on-create depends on this")
+	}
+	if !found.IsDisabled() {
+		t.Error("found group should report as disabled")
+	}
+
+	missing, err := c.FindUserGroupByHandle("no-such-handle")
+	if err != nil {
+		t.Fatalf("FindUserGroupByHandle(missing): %v", err)
+	}
+	if missing != nil {
+		t.Errorf("expected nil for an unknown handle, got %+v", missing)
+	}
+}
+
+func TestUpdateUserGroup_SendsOnlySetFields(t *testing.T) {
+	c, rec := newTestClient(t, routes{"/api/usergroups.update": fixture("usergroups_create_ok.json")})
+
+	name := "New Name"
+	if _, err := c.UpdateUserGroup(UpdateUserGroupRequest{ID: "S0615G0KT", Name: &name}); err != nil {
+		t.Fatalf("UpdateUserGroup: %v", err)
+	}
+	q := rec.last().Query
+	if q.Get("usergroup") != "S0615G0KT" {
+		t.Errorf("usergroup = %q", q.Get("usergroup"))
+	}
+	if q.Get("name") != "New Name" {
+		t.Errorf("name = %q", q.Get("name"))
+	}
+	if _, present := q["handle"]; present {
+		t.Error("unset handle should not be sent -- a nil pointer means 'leave unchanged'")
+	}
+}
+
+func TestDisableAndEnableUserGroup(t *testing.T) {
+	c, rec := newTestClient(t, routes{
+		"/api/usergroups.disable": fixture("usergroups_disable_ok.json"),
+		"/api/usergroups.enable":  fixture("usergroups_create_ok.json"),
+	})
+
+	disabled, err := c.DisableUserGroup("S0615G0KT")
+	if err != nil {
+		t.Fatalf("DisableUserGroup: %v", err)
+	}
+	if !disabled.IsDisabled() {
+		t.Error("disable response should report the group as disabled")
+	}
+	if rec.last().Method != http.MethodPost {
+		t.Errorf("disable method = %q, want POST", rec.last().Method)
+	}
+
+	enabled, err := c.EnableUserGroup("S0615G0KT")
+	if err != nil {
+		t.Fatalf("EnableUserGroup: %v", err)
+	}
+	if enabled.IsDisabled() {
+		t.Error("enable response should report the group as active")
+	}
+}
+
+func TestUpdateUserGroupUsers_JoinsIDs(t *testing.T) {
+	c, rec := newTestClient(t, routes{"/api/usergroups.users.update": fixture("usergroups_users_update_ok.json")})
+
+	g, err := c.UpdateUserGroupUsers("S0615G0KT", []string{"U060RNRCZ", "U060ULRC0"})
+	if err != nil {
+		t.Fatalf("UpdateUserGroupUsers: %v", err)
+	}
+	if len(g.Users) != 2 {
+		t.Errorf("Users = %v, want 2", g.Users)
+	}
+	q := rec.last().Query
+	if q.Get("usergroup") != "S0615G0KT" {
+		t.Errorf("usergroup = %q", q.Get("usergroup"))
+	}
+	if q.Get("users") != "U060RNRCZ,U060ULRC0" {
+		t.Errorf("users = %q, want a comma-separated list", q.Get("users"))
+	}
+}
+
+func TestListUserGroupUsers(t *testing.T) {
+	c, rec := newTestClient(t, routes{"/api/usergroups.users.list": fixture("usergroups_users_list_ok.json")})
+
+	users, err := c.ListUserGroupUsers("S0615G0KT")
+	if err != nil {
+		t.Fatalf("ListUserGroupUsers: %v", err)
+	}
+	if len(users) != 2 || users[0] != "U060RNRCZ" {
+		t.Errorf("users = %v", users)
+	}
+	if rec.last().Query.Get("usergroup") != "S0615G0KT" {
+		t.Error("usergroup param not sent")
+	}
+}
+
+// Every method must surface ok:false, not swallow it -- the NFR-3 lesson from PR #14,
+// where testing doRequest alone did not prove its callers safe.
+func TestUserGroupMethods_SurfaceOkFalse(t *testing.T) {
+	t.Run("create/paid_only", func(t *testing.T) {
+		c, _ := newTestClient(t, routes{"/api/usergroups.create": fixture("err_paid_only.json")})
+		_, err := c.CreateUserGroup(CreateUserGroupRequest{Name: "n", Handle: "h"})
+		if ErrorCode(err) != "paid_only" {
+			t.Errorf("ErrorCode = %q, want paid_only", ErrorCode(err))
+		}
+	})
+	t.Run("create/permission_denied", func(t *testing.T) {
+		c, _ := newTestClient(t, routes{"/api/usergroups.create": fixture("err_permission_denied.json")})
+		_, err := c.CreateUserGroup(CreateUserGroupRequest{Name: "n", Handle: "h"})
+		if ErrorCode(err) != "permission_denied" {
+			t.Errorf("ErrorCode = %q, want permission_denied", ErrorCode(err))
+		}
+	})
+	t.Run("list/missing_scope", func(t *testing.T) {
+		c, _ := newTestClient(t, routes{"/api/usergroups.list": fixture("err_missing_scope.json")})
+		_, err := c.ListUserGroups(false, false)
+		if ErrorCode(err) != "missing_scope" {
+			t.Errorf("ErrorCode = %q, want missing_scope", ErrorCode(err))
+		}
+	})
+	t.Run("update/no_such_subteam", func(t *testing.T) {
+		c, _ := newTestClient(t, routes{"/api/usergroups.update": fixture("err_no_such_subteam.json")})
+		n := "x"
+		_, err := c.UpdateUserGroup(UpdateUserGroupRequest{ID: "S1", Name: &n})
+		if ErrorCode(err) != "no_such_subteam" {
+			t.Errorf("ErrorCode = %q, want no_such_subteam", ErrorCode(err))
+		}
+	})
+	t.Run("users.update/invalid_users", func(t *testing.T) {
+		c, _ := newTestClient(t, routes{"/api/usergroups.users.update": fixture("err_invalid_users.json")})
+		_, err := c.UpdateUserGroupUsers("S1", []string{"nope"})
+		if ErrorCode(err) != "invalid_users" {
+			t.Errorf("ErrorCode = %q, want invalid_users", ErrorCode(err))
+		}
+	})
+	t.Run("disable/permission_denied", func(t *testing.T) {
+		c, _ := newTestClient(t, routes{"/api/usergroups.disable": fixture("err_permission_denied.json")})
+		_, err := c.DisableUserGroup("S1")
+		if ErrorCode(err) != "permission_denied" {
+			t.Errorf("ErrorCode = %q, want permission_denied", ErrorCode(err))
+		}
+	})
 }
