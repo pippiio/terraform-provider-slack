@@ -174,7 +174,11 @@ func TestProbe_UserGroups(t *testing.T) {
 	if emptyAccepted {
 		t.Log("   => do NOT add the FR-8 non-empty validator (spec default holds)")
 	} else {
-		t.Log("   => Slack rejects empty lists: ADD the FR-8 validator (plan Task 3.13)")
+		t.Log("   => an empty list is not sendable. Read the raw body above before concluding:")
+		t.Log("      an invalid_arguments/regex complaint means the EMPTY STRING failed user-ID")
+		t.Log("      validation, NOT that Slack forbids zero-member groups. Either way the")
+		t.Log("      provider cannot express 'no members', so a plan-time validator helps --")
+		t.Log("      but word it as a provider constraint, not a Slack rule.")
 	}
 	t.Logf("Q2 handle mutable via update       = %v", handleMutable)
 	if handleMutable {
