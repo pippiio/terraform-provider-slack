@@ -8,7 +8,8 @@ terraform {
 }
 
 provider "slack" {
-  host = "https://slack.com"
+  # host defaults to https://slack.com. Set it only to reach Slack through a proxy,
+  # or to point the provider at a stub. May also be supplied via SLACK_HOST.
 
   # Bot token (xoxb-). Used by everything except user group management.
   # May also be supplied via SLACK_TOKEN.

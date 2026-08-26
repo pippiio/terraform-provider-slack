@@ -2,6 +2,9 @@ package provider
 
 import (
 	"context"
+	"fmt"
+	"sort"
+	"strings"
 	"terraform-provider-slack/internal/slackclient"
 	"time"
 
@@ -89,6 +92,31 @@ func (d *userIdDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		if _, ok := requested[member.Name]; ok {
 			result[member.Name] = member.Id
 		}
+	}
+
+	// A username that resolved to nothing used to be dropped in silence. slack_ids is
+	// consumed as an authoritative set -- slack_message deletes any message whose ID
+	// is no longer present -- so a shrunken map destroys messages that were delivered
+	// perfectly well. Fail instead, and name what could not be found.
+	var unresolved []string
+	for _, u := range usernames {
+		if _, ok := result[u]; !ok {
+			unresolved = append(unresolved, u)
+		}
+	}
+	if len(unresolved) > 0 {
+		sort.Strings(unresolved)
+		resp.Diagnostics.AddError(
+			"Unresolved Slack usernames",
+			fmt.Sprintf(
+				"users.list returned no account for: %s\n\n"+
+					"These would have been dropped from slack_ids, which slack_message treats as "+
+					"authoritative -- the next apply would delete any message already sent to them. "+
+					"Check for a typo, a renamed account, or a deactivated one.",
+				strings.Join(unresolved, ", "),
+			),
+		)
+		return
 	}
 
 	slackMap, diags := types.MapValueFrom(ctx, types.StringType, result)

@@ -27,6 +27,10 @@ func New(version string) func() provider.Provider {
 	}
 }
 
+// defaultSlackHost is the Slack API's own address, used when no host is configured.
+// It carries the scheme because the client composes URLs as "<host>/api/<method>".
+const defaultSlackHost = "https://slack.com"
+
 // slackProvider is the provider implementation.
 type slackProvider struct {
 	// version is set to the provider version on release, "dev" when the
@@ -52,8 +56,10 @@ func (p *slackProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
-				Description: "URI for Slack API. May also be provided via SLACK_HOST environment variable.",
-				Optional:    true,
+				Description: "URI for the Slack API, including the scheme. Defaults to `https://slack.com`; " +
+					"set it only to reach Slack through a proxy or a stub. May also be provided via the " +
+					"SLACK_HOST environment variable.",
+				Optional: true,
 			},
 			"token": schema.StringAttribute{
 				Description: "Bot token for the Slack API (`xoxb-…`). May also be provided via the SLACK_TOKEN environment variable.",
@@ -111,14 +117,11 @@ func (p *slackProvider) Configure(ctx context.Context, req provider.ConfigureReq
 	token := resolveToken(config.Token, "SLACK_TOKEN")
 	userToken := resolveToken(config.UserToken, "SLACK_USER_TOKEN")
 
+	// There is one Slack. Requiring every configuration to repeat its address bought
+	// nothing -- the reason the attribute exists is to point tests and proxies
+	// somewhere else, and an explicit value still wins.
 	if host == "" {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("host"),
-			"Missing Slack API Host",
-			"The provider cannot create the Slack API client as there is a missing or empty value for the Slack API host. "+
-				"Set the host value in the configuration or use the SLACK_HOST environment variable. "+
-				"If either is already set, ensure the value is not empty.",
-		)
+		host = defaultSlackHost
 	}
 	if token == "" {
 		resp.Diagnostics.AddAttributeError(

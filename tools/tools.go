@@ -14,8 +14,10 @@ import (
 	_ "github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs"
 )
 
-// Format Terraform code for use in documentation.
-//go:generate terraform fmt -recursive ../examples/
+// Format the example configurations rendered into the documentation.
+//go:generate tofu fmt -recursive ../examples/
 
-// Generate documentation.
-//go:generate go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs generate --provider-dir .. -provider-name slack
+// Generate documentation. See generate-docs.sh for why this is a script rather than a
+// direct tfplugindocs call: tfplugindocs shells out to `terraform`, and this repo
+// drives it with OpenTofu instead.
+//go:generate ./generate-docs.sh
