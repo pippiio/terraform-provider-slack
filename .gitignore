@@ -1,3 +1,4 @@
 *.tfstate*
 draft
 terraform-provider-slack
+.terraform*
