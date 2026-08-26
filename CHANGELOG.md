@@ -27,18 +27,6 @@ becoming visible, not a new fault. Expect to see errors from:
 - messages addressed to a channel the bot has not been invited to
 - rate limiting on large recipient sets (`ratelimited`) — the provider does not retry
 
-**`slack_message.message` is now marked sensitive.**
-
-Terraform prints it as `(sensitive value)` in plan and apply output instead of echoing
-the text. The message body is frequently not public — an onboarding announcement, an
-unreleased change — and it was previously rendered in full in every plan.
-
-**What this means for you:** you can no longer read the message diff in plan output. If a
-value derived from it feeds somewhere Terraform refuses to print sensitive data, wrap the
-consumer in [`nonsensitive()`](https://developer.hashicorp.com/terraform/language/functions/nonsensitive).
-This hides the text from **output only** — Terraform state still stores it in plain text
-and must be treated as secret.
-
 **A changed `message` is now reposted rather than edited in place.**
 
 `slack_message` previously sent the new text with `chat.update`. An edited message stays

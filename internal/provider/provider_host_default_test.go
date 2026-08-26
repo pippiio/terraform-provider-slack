@@ -9,6 +9,7 @@ package provider
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -100,9 +101,12 @@ func TestProviderConfigure_MissingTokenStillFails(t *testing.T) {
 	}
 }
 
-// The message text can carry anything the operator sends to people -- credentials in
-// an onboarding announcement, unreleased news. Terraform must not print it in a plan.
-func TestMessageResourceSchema_MessageIsSensitive(t *testing.T) {
+// Sensitivity is opt-in per configuration via Terraform's sensitive() function, not
+// forced by the schema -- the framework marks attributes sensitive statically, so
+// setting it here would hide the message diff from everyone. The description has to
+// say so, since that is the only place an operator finds out. tfplugindocs publishes
+// it verbatim, so asserting on it keeps the published guidance honest.
+func TestMessageResourceSchema_MessageDocumentsHowToHideIt(t *testing.T) {
 	r := &messageResource{}
 	resp := &resource.SchemaResponse{}
 	r.Schema(context.Background(), resource.SchemaRequest{}, resp)
@@ -114,7 +118,15 @@ func TestMessageResourceSchema_MessageIsSensitive(t *testing.T) {
 	if !ok {
 		t.Fatal("schema has no message attribute")
 	}
-	if !attr.IsSensitive() {
-		t.Error("message is not marked sensitive, so terraform plan prints it in full")
+	if attr.IsSensitive() {
+		t.Error("message is marked sensitive at the schema level, which removes the operator's choice")
+	}
+
+	desc := attr.GetDescription()
+	if !strings.Contains(desc, "sensitive()") {
+		t.Errorf("description must tell operators how to hide the value; got: %s", desc)
+	}
+	if !strings.Contains(desc, "state") {
+		t.Errorf("description must warn that state still holds the text; got: %s", desc)
 	}
 }
