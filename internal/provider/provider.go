@@ -156,5 +156,6 @@ func (p *slackProvider) DataSources(_ context.Context) []func() datasource.DataS
 func (p *slackProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewMessageResource,
+		NewUserGroupResource,
 	}
 }
