@@ -42,12 +42,12 @@ type userGroupDataSource struct {
 }
 
 type userGroupDataSourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	Handle      types.String `tfsdk:"handle"`
-	Name        types.String `tfsdk:"name"`
-	Description types.String `tfsdk:"description"`
-	Channels    types.Set    `tfsdk:"channels"`
-	Users       types.Set    `tfsdk:"users"`
+	ID       types.String `tfsdk:"id"`
+	Handle   types.String `tfsdk:"handle"`
+	Name     types.String `tfsdk:"name"`
+	Purpose  types.String `tfsdk:"purpose"`
+	Channels types.Set    `tfsdk:"channels"`
+	Users    types.Set    `tfsdk:"users"`
 
 	TeamID             types.String `tfsdk:"team_id"`
 	UserCount          types.Int64  `tfsdk:"user_count"`
@@ -90,8 +90,11 @@ func (d *userGroupDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 				Optional:    true,
 				Computed:    true,
 			},
-			"name":        schema.StringAttribute{Description: "Display name of the user group.", Computed: true},
-			"description": schema.StringAttribute{Description: "Purpose of the group.", Computed: true},
+			"name": schema.StringAttribute{Description: "Display name of the user group.", Computed: true},
+			"purpose": schema.StringAttribute{
+				Description: "What the group is for. Slack's API calls this field `description`.",
+				Computed:    true,
+			},
 			"channels": schema.SetAttribute{
 				Description: "Default channel IDs new members are added to.",
 				ElementType: types.StringType,

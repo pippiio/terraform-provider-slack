@@ -37,6 +37,20 @@ func userGroupPlan(t *testing.T, r *userGroupResource, name, handle string, user
 	return tfsdk.Plan{Schema: sch, Raw: tftypes.NewValue(objType, vals)}
 }
 
+// withPurpose sets the purpose attribute on an already-built plan.
+func withPurpose(t *testing.T, plan *tfsdk.Plan, purpose string) {
+	t.Helper()
+	ctx := context.Background()
+	objType := plan.Schema.Type().TerraformType(ctx).(tftypes.Object)
+
+	var vals map[string]tftypes.Value
+	if err := plan.Raw.As(&vals); err != nil {
+		t.Fatalf("decoding plan: %v", err)
+	}
+	vals["purpose"] = tftypes.NewValue(tftypes.String, purpose)
+	plan.Raw = tftypes.NewValue(objType, vals)
+}
+
 func createUserGroup(t *testing.T, r *userGroupResource, plan tfsdk.Plan) *resource.CreateResponse {
 	t.Helper()
 	ctx := context.Background()
@@ -223,5 +237,40 @@ func TestUserGroupCreate_AdoptKeepsIDPFlagsFromListResponse(t *testing.T) {
 	detail := resp.Diagnostics.Errors()[0].Detail()
 	if !strings.Contains(strings.ToLower(detail), "identity provider") {
 		t.Errorf("diagnostic should name the IdP ownership, not a generic Slack error; got: %s", detail)
+	}
+}
+
+// The schema calls this field "purpose", after the Slack UI; the API calls it
+// "description". Both directions are pinned here because the reply comes from a fixture:
+// a wrong tfsdk tag, or a missed rename in the request mapping, would otherwise leave
+// every other test passing while the value never reached Slack.
+func TestUserGroupCreate_PurposeIsSentAsDescription(t *testing.T) {
+	r, rec := newRecordingUserGroupResource(t, map[string]stub{
+		"/api/usergroups.list":   raw(200, emptyList),
+		"/api/usergroups.create": fixture("usergroups_create_ok.json"),
+	})
+
+	plan := userGroupPlan(t, r, "Marketing Team", "marketing-team", nil)
+	withPurpose(t, &plan, "Marketing gurus.")
+
+	resp := createUserGroup(t, r, plan)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+
+	req, ok := rec.find("/api/usergroups.create")
+	if !ok {
+		t.Fatal("usergroups.create was never called")
+	}
+	if got := req.Query.Get("description"); got != "Marketing gurus." {
+		t.Errorf("wire description = %q, want the configured purpose", got)
+	}
+
+	var m userGroupResourceModel
+	if d := resp.State.Get(context.Background(), &m); d.HasError() {
+		t.Fatalf("reading state: %v", d)
+	}
+	if m.Purpose.ValueString() != "Marketing gurus, PR experts and product advocates." {
+		t.Errorf("purpose = %q, want the description from the response", m.Purpose.ValueString())
 	}
 }

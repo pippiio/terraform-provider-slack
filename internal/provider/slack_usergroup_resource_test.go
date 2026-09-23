@@ -14,7 +14,16 @@ import (
 
 func newUserGroupResource(t *testing.T, rt map[string]stub) *userGroupResource {
 	t.Helper()
-	return &userGroupResource{client: newStubClient(t, rt)}
+	r, _ := newRecordingUserGroupResource(t, rt)
+	return r
+}
+
+// newRecordingUserGroupResource also hands back the requests the resource made, for
+// tests asserting on what went to Slack rather than what came back.
+func newRecordingUserGroupResource(t *testing.T, rt map[string]stub) (*userGroupResource, *stubRecorder) {
+	t.Helper()
+	c, rec := newRecordingStubClient(t, rt)
+	return &userGroupResource{client: c}, rec
 }
 
 func userGroupSchema(t *testing.T) resource.SchemaResponse {
@@ -90,13 +99,20 @@ func TestUserGroupResource_SchemaHasExpectedAttributes(t *testing.T) {
 	attrs := userGroupSchema(t).Schema.Attributes
 
 	for _, name := range []string{
-		"id", "name", "handle", "description", "channels", "users",
+		"id", "name", "handle", "purpose", "channels", "users",
 		"team_id", "user_count", "date_create", "date_update", "is_disabled",
 		"is_idp_group", "is_membership_locked",
 	} {
 		if _, ok := attrs[name]; !ok {
 			t.Errorf("schema is missing attribute %q", name)
 		}
+	}
+
+	// Slack's API calls this field "description", but every surface a user actually
+	// sees -- the group creation dialog, the group's page -- calls it "Purpose". The
+	// schema follows the UI; the translation to the wire name happens in slackclient.
+	if _, ok := attrs["description"]; ok {
+		t.Error(`schema exposes "description"; the Slack UI calls this field "Purpose"`)
 	}
 }
 

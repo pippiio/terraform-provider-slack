@@ -66,18 +66,19 @@ func userGroupToModel(ctx context.Context, g *slackclient.UserGroup, prior userG
 		users = stringsToSet(ctx, g.Users, &diags)
 	}
 
-	description := prior.Description
+	// Slack's wire field is "description"; the schema calls it "purpose", after the UI.
+	purpose := prior.Purpose
 	if g.Description != nil {
-		description = types.StringValue(*g.Description)
+		purpose = types.StringValue(*g.Description)
 	}
 
 	return userGroupResourceModel{
-		ID:          types.StringValue(g.ID),
-		Name:        types.StringValue(g.Name),
-		Handle:      types.StringValue(g.Handle),
-		Description: description,
-		Channels:    channels,
-		Users:       users,
+		ID:       types.StringValue(g.ID),
+		Name:     types.StringValue(g.Name),
+		Handle:   types.StringValue(g.Handle),
+		Purpose:  purpose,
+		Channels: channels,
+		Users:    users,
 
 		TeamID:             types.StringValue(g.TeamID),
 		UserCount:          types.Int64Value(g.UserCount.Int64()),
@@ -193,18 +194,19 @@ func userGroupToDataSourceModel(ctx context.Context, g *slackclient.UserGroup) (
 		channels = types.SetNull(types.StringType)
 	}
 
-	description := types.StringNull()
+	// Slack's wire field is "description"; the schema calls it "purpose", after the UI.
+	purpose := types.StringNull()
 	if g.Description != nil {
-		description = types.StringValue(*g.Description)
+		purpose = types.StringValue(*g.Description)
 	}
 
 	return userGroupDataSourceModel{
-		ID:          types.StringValue(g.ID),
-		Handle:      types.StringValue(g.Handle),
-		Name:        types.StringValue(g.Name),
-		Description: description,
-		Channels:    channels,
-		Users:       stringsToSet(ctx, g.Users, &diags),
+		ID:       types.StringValue(g.ID),
+		Handle:   types.StringValue(g.Handle),
+		Name:     types.StringValue(g.Name),
+		Purpose:  purpose,
+		Channels: channels,
+		Users:    stringsToSet(ctx, g.Users, &diags),
 
 		TeamID:             types.StringValue(g.TeamID),
 		UserCount:          types.Int64Value(g.UserCount.Int64()),

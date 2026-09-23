@@ -42,7 +42,9 @@ mistyped username has been quietly losing that recipient, and will now say so. S
   use the bot token alone.
 
 - **`slack_usergroup` resource and data source** — manage Slack user groups (`@mention`
-  groups) with name, handle, description, default channels and membership.
+  groups) with name, handle, purpose, default channels and membership.
+  - The purpose attribute is Slack's `description` field, named after the group dialog in
+    the Slack UI rather than after the API.
   - **The resource requires `user_token`**; the data source does not. Configuring the
     resource without one fails at plan time with a diagnostic showing exactly what to set.
   - **Requires a paid Slack plan.** User groups are unavailable on the free plan, where

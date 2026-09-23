@@ -52,12 +52,12 @@ type userGroupResource struct {
 }
 
 type userGroupResourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	Handle      types.String `tfsdk:"handle"`
-	Description types.String `tfsdk:"description"`
-	Channels    types.Set    `tfsdk:"channels"`
-	Users       types.Set    `tfsdk:"users"`
+	ID       types.String `tfsdk:"id"`
+	Name     types.String `tfsdk:"name"`
+	Handle   types.String `tfsdk:"handle"`
+	Purpose  types.String `tfsdk:"purpose"`
+	Channels types.Set    `tfsdk:"channels"`
+	Users    types.Set    `tfsdk:"users"`
 
 	TeamID             types.String `tfsdk:"team_id"`
 	UserCount          types.Int64  `tfsdk:"user_count"`
@@ -98,9 +98,10 @@ func (r *userGroupResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 					"stays reserved after the group is disabled.",
 				Required: true,
 			},
-			"description": schema.StringAttribute{
-				Description: "Purpose of the group.",
-				Optional:    true,
+			"purpose": schema.StringAttribute{
+				Description: "What the group is for. Slack's API calls this field `description`; " +
+					"every surface a user sees calls it the group's purpose, and so does this schema.",
+				Optional: true,
 			},
 			"channels": schema.SetAttribute{
 				Description: "Channel IDs new members are added to by default (Slack's `prefs.channels`). " +
@@ -251,7 +252,7 @@ func (r *userGroupResource) Create(ctx context.Context, req resource.CreateReque
 		group, err = r.client.CreateUserGroup(slackclient.CreateUserGroupRequest{
 			Name:        plan.Name.ValueString(),
 			Handle:      handle,
-			Description: plan.Description.ValueString(),
+			Description: plan.Purpose.ValueString(),
 			Channels:    channels,
 		})
 
@@ -270,7 +271,7 @@ func (r *userGroupResource) Create(ctx context.Context, req resource.CreateReque
 			),
 		)
 		if _, err = r.client.EnableUserGroup(existing.ID); err == nil {
-			name, desc := plan.Name.ValueString(), plan.Description.ValueString()
+			name, desc := plan.Name.ValueString(), plan.Purpose.ValueString()
 			group, err = r.client.UpdateUserGroup(slackclient.UpdateUserGroupRequest{
 				ID:          existing.ID,
 				Name:        &name,
@@ -377,7 +378,7 @@ func (r *userGroupResource) Update(ctx context.Context, req resource.UpdateReque
 	id := state.ID.ValueString()
 	name := plan.Name.ValueString()
 	handle := plan.Handle.ValueString()
-	desc := plan.Description.ValueString()
+	desc := plan.Purpose.ValueString()
 
 	group, err := r.client.UpdateUserGroup(slackclient.UpdateUserGroupRequest{
 		ID:          id,

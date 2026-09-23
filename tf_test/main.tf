@@ -51,17 +51,17 @@ data "slack_usergroup" "existing" {
 
 # Slack-owned membership: `users` omitted, so the provider never touches it.
 resource "slack_usergroup" "smoke_no_members" {
-  name        = "draft smoke test"
-  handle      = "draft-smoke-test"
-  description = "Created by tf_test for manual verification. Safe to disable."
+  name    = "draft smoke test"
+  handle  = "draft-smoke-test"
+  purpose = "Created by tf_test for manual verification. Safe to disable."
 }
 
 # Terraform-owned membership. `users` must be non-empty when set -- omit it instead to
 # leave membership to Slack.
 resource "slack_usergroup" "smoke_with_members" {
-  name        = "draft smoke test members"
-  handle      = "draft-smoke-test-members"
-  description = "Membership is authoritative: manual additions are removed on apply."
+  name    = "draft smoke test members"
+  handle  = "draft-smoke-test-members"
+  purpose = "Membership is authoritative: manual additions are removed on apply."
 
   users = [data.slack_user.by_id.id]
 }

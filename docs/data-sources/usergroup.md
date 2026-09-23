@@ -74,12 +74,12 @@ resource "slack_message" "standup" {
 - `channels` (Set of String) Default channel IDs new members are added to.
 - `date_create` (Number) Unix timestamp when the group was created.
 - `date_update` (Number) Unix timestamp of the last change.
-- `description` (String) Purpose of the group.
 - `is_disabled` (Boolean) True if the group is disabled. Slack has no delete, so destroyed groups remain in this state.
 - `is_external` (Boolean) True if the group originates outside this workspace.
 - `is_idp_group` (Boolean) True if the group is synced from an identity provider, which owns its membership.
 - `is_membership_locked` (Boolean) True if Slack has locked the group's membership.
 - `name` (String) Display name of the user group.
+- `purpose` (String) What the group is for. Slack's API calls this field `description`.
 - `team_id` (String) ID of the workspace the group belongs to.
 - `user_count` (Number) Number of members Slack reports.
 - `users` (Set of String) Slack user IDs currently in the group.

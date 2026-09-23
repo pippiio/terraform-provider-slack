@@ -35,9 +35,9 @@ Requires the `usergroups:read` and `usergroups:write` scopes. Note that Slack al
 
 # Authoritative membership: Terraform owns who is in the group.
 resource "slack_usergroup" "engineering" {
-  name        = "Engineering"
-  handle      = "engineering" # the @mention abbreviation
-  description = "Everyone who ships product code"
+  name    = "Engineering"
+  handle  = "engineering" # the @mention abbreviation
+  purpose = "Everyone who ships product code"
 
   # Default channels new members are added to.
   channels = ["C0611AAAA"]
@@ -62,9 +62,9 @@ data "slack_user" "bob" {
 # Slack-owned membership: omit `users` entirely and the provider never touches it.
 # Use this when the group is populated by people, another tool, or an identity provider.
 resource "slack_usergroup" "on_call" {
-  name        = "On Call"
-  handle      = "on-call"
-  description = "Rotation membership is managed outside Terraform"
+  name    = "On Call"
+  handle  = "on-call"
+  purpose = "Rotation membership is managed outside Terraform"
   # no `users` attribute -- membership is left to Slack
 }
 
@@ -93,7 +93,7 @@ output "engineering_disabled" {
 ### Optional
 
 - `channels` (Set of String) Channel IDs new members are added to by default (Slack's `prefs.channels`). These are default channels for the group, not a list of channels the group belongs to.
-- `description` (String) Purpose of the group.
+- `purpose` (String) What the group is for. Slack's API calls this field `description`; every surface a user sees calls it the group's purpose, and so does this schema.
 - `users` (Set of String) Slack user IDs belonging to the group. **This attribute is authoritative**: Slack offers only a replace operation for membership, so anyone added to the group by hand in Slack is removed on the next apply, and Slack sends no notification when that happens. **Omit this attribute entirely** to let Slack own membership — the provider then never touches it. Cannot be used on groups synced from an identity provider or with membership locked.
 
 Must contain at least one user ID when set — Slack provides no way to express an empty group through its membership API. Omit the attribute entirely instead.

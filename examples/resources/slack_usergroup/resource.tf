@@ -11,9 +11,9 @@
 
 # Authoritative membership: Terraform owns who is in the group.
 resource "slack_usergroup" "engineering" {
-  name        = "Engineering"
-  handle      = "engineering" # the @mention abbreviation
-  description = "Everyone who ships product code"
+  name    = "Engineering"
+  handle  = "engineering" # the @mention abbreviation
+  purpose = "Everyone who ships product code"
 
   # Default channels new members are added to.
   channels = ["C0611AAAA"]
@@ -38,9 +38,9 @@ data "slack_user" "bob" {
 # Slack-owned membership: omit `users` entirely and the provider never touches it.
 # Use this when the group is populated by people, another tool, or an identity provider.
 resource "slack_usergroup" "on_call" {
-  name        = "On Call"
-  handle      = "on-call"
-  description = "Rotation membership is managed outside Terraform"
+  name    = "On Call"
+  handle  = "on-call"
+  purpose = "Rotation membership is managed outside Terraform"
   # no `users` attribute -- membership is left to Slack
 }
 
