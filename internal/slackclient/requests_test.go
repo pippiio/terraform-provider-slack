@@ -227,3 +227,59 @@ func TestReadUserIds_OkFalseSurfacesError(t *testing.T) {
 		t.Errorf("ErrorCode = %q, want missing_scope", got)
 	}
 }
+
+// Guardrails A-8: users.list is paginated by Slack. Reading only the first page makes
+// every member past it invisible, which slack_user_ids then reports as an unresolved
+// username -- a hard error since the fix above, for an account that exists.
+func TestReadUserIds_FollowsCursorToLaterPages(t *testing.T) {
+	c, rec := newTestClient(t, routes{
+		"/api/users.list": sequence(
+			fixture("users_list_page1.json"),
+			fixture("users_list_page2.json"),
+		),
+	})
+
+	res, err := c.ReadUserIds()
+	if err != nil {
+		t.Fatalf("ReadUserIds returned error: %v", err)
+	}
+
+	got := map[string]string{}
+	for _, m := range res.Members {
+		got[m.Name] = m.Id
+	}
+	if len(got) != 2 {
+		t.Fatalf("collected %d members (%v), want both pages", len(got), got)
+	}
+	if got["spengler"] != "W012A3CDE" {
+		t.Errorf("spengler = %q, want W012A3CDE from page 1", got["spengler"])
+	}
+	if got["glinda"] != "W07QCRPA4" {
+		t.Errorf("glinda = %q, want W07QCRPA4 from page 2", got["glinda"])
+	}
+
+	reqs := rec.all()
+	if len(reqs) != 2 {
+		t.Fatalf("made %d requests, want 2 (one per page)", len(reqs))
+	}
+	if got := reqs[0].Query.Get("limit"); got == "" {
+		t.Error("users.list must be called with an explicit limit")
+	}
+	if got := reqs[1].Query.Get("cursor"); got != "dXNlcjpVMDYxTkZUVDI=" {
+		t.Errorf("second request cursor = %q, want the next_cursor from page 1", got)
+	}
+}
+
+// A cursor that never empties must not loop forever.
+func TestReadUserIds_StopsOnRepeatedCursor(t *testing.T) {
+	c, rec := newTestClient(t, routes{
+		"/api/users.list": fixture("users_list_page1.json"),
+	})
+
+	if _, err := c.ReadUserIds(); err != nil {
+		t.Fatalf("ReadUserIds returned error: %v", err)
+	}
+	if got := rec.count(); got > 20 {
+		t.Errorf("made %d requests, want a bounded scan", got)
+	}
+}

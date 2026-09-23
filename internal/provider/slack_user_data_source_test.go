@@ -13,13 +13,13 @@ import (
 // userSchema returns the data source schema, failing the test on diagnostics.
 func userSchema(t *testing.T, d *userDataSource) tfsdk.Config {
 	t.Helper()
-	return userConfig(t, d, nil, nil)
+	return userConfig(t, d, nil, nil, nil)
 }
 
 // userConfig builds a config with every attribute null except the ones supplied.
 // Deriving the nulls from the schema keeps this from needing an update every time an
 // attribute is added.
-func userConfig(t *testing.T, d *userDataSource, id, email *string) tfsdk.Config {
+func userConfig(t *testing.T, d *userDataSource, id, email, name *string) tfsdk.Config {
 	t.Helper()
 	ctx := context.Background()
 
@@ -45,6 +45,9 @@ func userConfig(t *testing.T, d *userDataSource, id, email *string) tfsdk.Config
 	if email != nil {
 		vals["email"] = tftypes.NewValue(tftypes.String, *email)
 	}
+	if name != nil {
+		vals["name"] = tftypes.NewValue(tftypes.String, *name)
+	}
 
 	return tfsdk.Config{Schema: sch, Raw: tftypes.NewValue(objType, vals)}
 }
@@ -65,7 +68,7 @@ func ptr(s string) *string { return &s }
 
 func TestUserDataSource_RejectsBothIDAndEmail(t *testing.T) {
 	d := &userDataSource{}
-	resp := validateConfig(t, d, userConfig(t, d, ptr("W012A3CDE"), ptr("a@b.com")))
+	resp := validateConfig(t, d, userConfig(t, d, ptr("W012A3CDE"), ptr("a@b.com"), nil))
 
 	if !resp.Diagnostics.HasError() {
 		t.Fatal("setting both id and email must be a config error")
@@ -83,7 +86,7 @@ func TestUserDataSource_RejectsNeitherIDNorEmail(t *testing.T) {
 
 func TestUserDataSource_AcceptsIDAlone(t *testing.T) {
 	d := &userDataSource{}
-	resp := validateConfig(t, d, userConfig(t, d, ptr("W012A3CDE"), nil))
+	resp := validateConfig(t, d, userConfig(t, d, ptr("W012A3CDE"), nil, nil))
 
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("id alone must be valid, got: %v", resp.Diagnostics)
@@ -92,7 +95,7 @@ func TestUserDataSource_AcceptsIDAlone(t *testing.T) {
 
 func TestUserDataSource_AcceptsEmailAlone(t *testing.T) {
 	d := &userDataSource{}
-	resp := validateConfig(t, d, userConfig(t, d, nil, ptr("a@b.com")))
+	resp := validateConfig(t, d, userConfig(t, d, nil, ptr("a@b.com"), nil))
 
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("email alone must be valid, got: %v", resp.Diagnostics)
@@ -127,7 +130,7 @@ func TestUserDataSourceRead_ByID(t *testing.T) {
 	d := &userDataSource{client: newStubClient(t, map[string]stub{
 		"/api/users.info": fixture("users_info_full.json"),
 	})}
-	resp := readUser(t, d, userConfig(t, d, ptr("W012A3CDE"), nil))
+	resp := readUser(t, d, userConfig(t, d, ptr("W012A3CDE"), nil, nil))
 
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
@@ -163,7 +166,7 @@ func TestUserDataSourceRead_ByEmail(t *testing.T) {
 	d := &userDataSource{client: newStubClient(t, map[string]stub{
 		"/api/users.lookupByEmail": fixture("users_info_full.json"),
 	})}
-	resp := readUser(t, d, userConfig(t, d, nil, ptr("spengler@ghostbusters.example.com")))
+	resp := readUser(t, d, userConfig(t, d, nil, ptr("spengler@ghostbusters.example.com"), nil))
 
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
@@ -184,7 +187,7 @@ func TestUserDataSourceRead_NotFoundFailsTheApply(t *testing.T) {
 	d := &userDataSource{client: newStubClient(t, map[string]stub{
 		"/api/users.info": fixture("err_users_not_found.json"),
 	})}
-	resp := readUser(t, d, userConfig(t, d, ptr("U000000000"), nil))
+	resp := readUser(t, d, userConfig(t, d, ptr("U000000000"), nil, nil))
 
 	if !resp.Diagnostics.HasError() {
 		t.Fatal("an unknown user must fail the apply, not return an empty user")
@@ -200,7 +203,7 @@ func TestUserDataSourceRead_MissingScopeNamesTheScope(t *testing.T) {
 	d := &userDataSource{client: newStubClient(t, map[string]stub{
 		"/api/users.lookupByEmail": fixture("err_missing_scope.json"),
 	})}
-	resp := readUser(t, d, userConfig(t, d, nil, ptr("a@b.com")))
+	resp := readUser(t, d, userConfig(t, d, nil, ptr("a@b.com"), nil))
 
 	if !resp.Diagnostics.HasError() {
 		t.Fatal("missing_scope must produce a diagnostic")
@@ -217,7 +220,7 @@ func TestUserDataSourceRead_AbsentEmailIsNull(t *testing.T) {
 	d := &userDataSource{client: newStubClient(t, map[string]stub{
 		"/api/users.info": fixture("users_info_no_email_scope.json"),
 	})}
-	resp := readUser(t, d, userConfig(t, d, ptr("W012A3CDE"), nil))
+	resp := readUser(t, d, userConfig(t, d, ptr("W012A3CDE"), nil, nil))
 
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("a missing email field must not be an error: %v", resp.Diagnostics)
@@ -236,9 +239,109 @@ func TestUserDataSourceRead_InvalidAuthIsDiagnosed(t *testing.T) {
 	d := &userDataSource{client: newStubClient(t, map[string]stub{
 		"/api/users.info": fixture("err_invalid_auth.json"),
 	})}
-	resp := readUser(t, d, userConfig(t, d, ptr("W012A3CDE"), nil))
+	resp := readUser(t, d, userConfig(t, d, ptr("W012A3CDE"), nil, nil))
 
 	if !resp.Diagnostics.HasError() {
 		t.Fatal("invalid_auth must produce a diagnostic")
+	}
+}
+
+// --- Lookup by username (handle) ---
+//
+// Review feedback: slack_user_ids resolves usernames to IDs, so slack_user must cover
+// the same ground before that data source can be retired.
+
+func TestUserDataSource_AcceptsNameAlone(t *testing.T) {
+	d := &userDataSource{}
+	resp := validateConfig(t, d, userConfig(t, d, nil, nil, ptr("glinda")))
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("name alone must be valid, got: %v", resp.Diagnostics)
+	}
+}
+
+func TestUserDataSource_RejectsIDAndName(t *testing.T) {
+	d := &userDataSource{}
+	resp := validateConfig(t, d, userConfig(t, d, ptr("W012A3CDE"), nil, ptr("glinda")))
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("setting both id and name must be a config error")
+	}
+}
+
+func TestUserDataSource_RejectsEmailAndName(t *testing.T) {
+	d := &userDataSource{}
+	resp := validateConfig(t, d, userConfig(t, d, nil, ptr("a@b.com"), ptr("glinda")))
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("setting both email and name must be a config error")
+	}
+}
+
+func TestUserDataSourceRead_ByName(t *testing.T) {
+	d := &userDataSource{client: newStubClient(t, map[string]stub{
+		"/api/users.list": fixture("users_list_full.json"),
+	})}
+	resp := readUser(t, d, userConfig(t, d, nil, nil, ptr("glinda")))
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+
+	var m userDataSourceModel
+	if diags := resp.State.Get(context.Background(), &m); diags.HasError() {
+		t.Fatalf("reading state: %v", diags)
+	}
+	if m.ID.ValueString() != "W07QCRPA4" {
+		t.Errorf("id = %q, want W07QCRPA4 -- this is what slack_user_ids returned", m.ID.ValueString())
+	}
+	if m.Name.ValueString() != "glinda" {
+		t.Errorf("name = %q, want glinda", m.Name.ValueString())
+	}
+	// The list entry carries the whole user, so the rest of the schema is populated too.
+	if m.RealName.ValueString() != "Glinda Southgood" {
+		t.Errorf("real_name = %q, want Glinda Southgood", m.RealName.ValueString())
+	}
+	if m.Email.ValueString() != "glinda@south.oz.example.com" {
+		t.Errorf("email = %q, want the address", m.Email.ValueString())
+	}
+}
+
+func TestUserDataSourceRead_UnknownNameNamesTheUsername(t *testing.T) {
+	d := &userDataSource{client: newStubClient(t, map[string]stub{
+		"/api/users.list": fixture("users_list_full.json"),
+	})}
+	resp := readUser(t, d, userConfig(t, d, nil, nil, ptr("nobody")))
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("an unknown username must fail the apply")
+	}
+	err := resp.Diagnostics.Errors()[0]
+	detail := err.Summary() + " " + err.Detail()
+	if !strings.Contains(detail, "nobody") {
+		t.Errorf("diagnostic must name the username, got: %s", detail)
+	}
+	if !strings.Contains(strings.ToLower(detail), "username") {
+		t.Errorf("diagnostic must say it was a username lookup, got: %s", detail)
+	}
+}
+
+// Lookup by name needs users:read, not users:read.email -- naming the wrong scope
+// sends the operator to add a scope that would not fix anything.
+func TestUserDataSourceRead_NameMissingScopeNamesUsersRead(t *testing.T) {
+	d := &userDataSource{client: newStubClient(t, map[string]stub{
+		"/api/users.list": fixture("err_missing_scope.json"),
+	})}
+	resp := readUser(t, d, userConfig(t, d, nil, nil, ptr("glinda")))
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("missing_scope must produce a diagnostic")
+	}
+	detail := resp.Diagnostics.Errors()[0].Detail()
+	if !strings.Contains(detail, "users:read") {
+		t.Errorf("diagnostic must name users:read, got: %s", detail)
+	}
+	if strings.Contains(detail, "users:read.email") {
+		t.Errorf("name lookup does not need users:read.email, got: %s", detail)
 	}
 }

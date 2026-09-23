@@ -2,18 +2,21 @@ package provider
 
 // Story: slack_user data source
 //
-// Input:  a Terraform config setting exactly one of `id` (Slack user ID) or `email`.
+// Input:  a Terraform config setting exactly one of `id` (Slack user ID), `email`, or
+//         `name` (the Slack handle).
 // Process:
 //   1. Read the config; the framework has already enforced exactly-one-of via
 //      ConfigValidators, so no API call happens for an invalid config.
-//   2. Call users.info for an id, or users.lookupByEmail for an email.
+//   2. Call users.info for an id, users.lookupByEmail for an email, or a paginated
+//      users.list scan for a name -- Slack has no lookup-by-name endpoint.
 //   3. On a Slack error, translate the error code into an actionable diagnostic --
 //      notably naming the scope to add when the token lacks users:read.email.
 //   4. Map the user object onto the schema, preserving null for fields Slack omitted.
 // Output: state holding the full user object, with a nested `profile` block.
 //
-// Dependencies: slackclient.GetUserByID / GetUserByEmail.
-// Side effects: one HTTPS GET per read. No writes.
+// Dependencies: slackclient.GetUserByID / GetUserByEmail / GetUserByName.
+// Side effects: one HTTPS GET per read, or one per users.list page for a name lookup.
+// No writes.
 
 import (
 	"context"
@@ -120,19 +123,20 @@ func (d *userDataSource) ConfigValidators(_ context.Context) []datasource.Config
 		datasourcevalidator.ExactlyOneOf(
 			path.MatchRoot("id"),
 			path.MatchRoot("email"),
+			path.MatchRoot("name"),
 		),
 	}
 }
 
 func (d *userDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Looks up a single Slack user by ID or email address. " +
-			"Exactly one of `id` or `email` must be set. " +
+		Description: "Looks up a single Slack user by ID, email address, or username. " +
+			"Exactly one of `id`, `email` or `name` must be set. " +
 			"Requires the `users:read` scope; `users:read.email` is additionally required " +
 			"for lookup by email and for the `email` attribute to be populated.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description: "Slack user ID, e.g. `W012A3CDE`. Set this to look the user up by ID. Computed when looking up by email.",
+				Description: "Slack user ID, e.g. `W012A3CDE`. Set this to look the user up by ID. Computed when looking up by `email` or `name`.",
 				Optional:    true,
 				Computed:    true,
 			},
@@ -146,8 +150,13 @@ func (d *userDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 				Computed:    true,
 			},
 			"name": schema.StringAttribute{
-				Description: "The user's Slack handle, not their display name.",
-				Computed:    true,
+				Description: "The user's Slack handle, not their display name. Set this to look the " +
+					"user up by username; the match is exact and case-sensitive. Computed otherwise. " +
+					"Slack has no lookup-by-username endpoint, so this selector scans `users.list`, " +
+					"a Tier 2 method limited to roughly 20 requests per minute -- prefer `id` or " +
+					"`email` where you have one.",
+				Optional: true,
+				Computed: true,
 			},
 			"real_name": schema.StringAttribute{
 				Description: "The user's real name.",
@@ -292,20 +301,24 @@ func (d *userDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	var (
 		user       *slackclient.User
 		err        error
-		lookupByID = !config.ID.IsNull()
+		kind       lookupKind
 		identifier string
 	)
 
-	if lookupByID {
-		identifier = config.ID.ValueString()
+	switch {
+	case !config.ID.IsNull():
+		kind, identifier = lookupByID, config.ID.ValueString()
 		user, err = d.client.GetUserByID(identifier)
-	} else {
-		identifier = config.Email.ValueString()
+	case !config.Email.IsNull():
+		kind, identifier = lookupByEmail, config.Email.ValueString()
 		user, err = d.client.GetUserByEmail(identifier)
+	default:
+		kind, identifier = lookupByName, config.Name.ValueString()
+		user, err = d.client.GetUserByName(identifier)
 	}
 
 	if err != nil {
-		summary, detail := lookupErrorDiagnostic(err, lookupByID, identifier)
+		summary, detail := lookupErrorDiagnostic(err, kind, identifier)
 		resp.Diagnostics.AddError(summary, detail)
 		return
 	}

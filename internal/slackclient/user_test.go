@@ -328,3 +328,134 @@ func TestProfileFields_MalformedIsAnError(t *testing.T) {
 		t.Error("expected an error for a string in place of the fields object")
 	}
 }
+
+// --- Lookup by username (handle) ---
+//
+// Slack has no lookup-by-name endpoint, so this is a users.list scan. These tests pin
+// the three things that makes non-obvious: it must return the *full* user object (the
+// list entries are complete user objects, so no second users.info call is needed), it
+// must paginate (guardrails A-8), and an unmatched name must fail the way an unmatched
+// ID does rather than returning a zero user.
+
+func TestGetUserByName_ReturnsFullUser(t *testing.T) {
+	c, rec := newTestClient(t, routes{
+		"/api/users.list": fixture("users_list_full.json"),
+	})
+
+	u, err := c.GetUserByName("glinda")
+	if err != nil {
+		t.Fatalf("GetUserByName returned error: %v", err)
+	}
+	if u.ID != "W07QCRPA4" {
+		t.Errorf("ID = %q, want W07QCRPA4", u.ID)
+	}
+	if u.Name != "glinda" {
+		t.Errorf("Name = %q, want glinda", u.Name)
+	}
+	if u.Profile.Title == nil || *u.Profile.Title != "Glinda the Good" {
+		t.Errorf("Profile.Title = %v, want the title -- the list entry must be mapped in full", u.Profile.Title)
+	}
+	if u.Profile.Email == nil || *u.Profile.Email != "glinda@south.oz.example.com" {
+		t.Errorf("Profile.Email = %v, want the address", u.Profile.Email)
+	}
+
+	req := rec.last()
+	if req.Path != "/api/users.list" {
+		t.Errorf("path = %q, want /api/users.list", req.Path)
+	}
+	if got := req.Query.Get("limit"); got == "" {
+		t.Error("users.list must be called with an explicit limit, so the scan is bounded per page")
+	}
+	if req.Authorization != "Bearer xoxb-test-token" {
+		t.Errorf("Authorization = %q, want the bearer token", req.Authorization)
+	}
+}
+
+// Guardrails A-8: an unpaginated scan silently fails to find anyone past the first
+// page, which reads as "no such user" for a name that does exist.
+func TestGetUserByName_FollowsCursorToLaterPages(t *testing.T) {
+	c, rec := newTestClient(t, routes{
+		"/api/users.list": sequence(
+			fixture("users_list_page1.json"),
+			fixture("users_list_page2.json"),
+		),
+	})
+
+	u, err := c.GetUserByName("glinda")
+	if err != nil {
+		t.Fatalf("GetUserByName returned error: %v", err)
+	}
+	if u.ID != "W07QCRPA4" {
+		t.Errorf("ID = %q, want W07QCRPA4 from page 2", u.ID)
+	}
+
+	reqs := rec.all()
+	if len(reqs) != 2 {
+		t.Fatalf("made %d requests, want 2 (one per page)", len(reqs))
+	}
+	if got := reqs[0].Query.Get("cursor"); got != "" {
+		t.Errorf("first request cursor = %q, want empty", got)
+	}
+	if got := reqs[1].Query.Get("cursor"); got != "dXNlcjpVMDYxTkZUVDI=" {
+		t.Errorf("second request cursor = %q, want the next_cursor from page 1", got)
+	}
+}
+
+// Stop as soon as the name matches: scanning pages we do not need burns Tier-2 budget.
+func TestGetUserByName_StopsAtTheMatchingPage(t *testing.T) {
+	c, rec := newTestClient(t, routes{
+		"/api/users.list": sequence(
+			fixture("users_list_page1.json"),
+			fixture("users_list_page2.json"),
+		),
+	})
+
+	if _, err := c.GetUserByName("spengler"); err != nil {
+		t.Fatalf("GetUserByName returned error: %v", err)
+	}
+
+	if got := rec.count(); got != 1 {
+		t.Errorf("made %d requests, want 1 -- the match was on page 1", got)
+	}
+}
+
+func TestGetUserByName_UnknownNameIsUsersNotFound(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/users.list": fixture("users_list_full.json"),
+	})
+
+	u, err := c.GetUserByName("nobody")
+	if err == nil {
+		t.Fatalf("expected an error for an unknown username, got user=%+v", u)
+	}
+	if u != nil {
+		t.Errorf("user = %+v, want nil on error", u)
+	}
+	if got := ErrorCode(err); got != "users_not_found" {
+		t.Errorf("ErrorCode = %q, want users_not_found so the caller can diagnose it like any other miss", got)
+	}
+}
+
+func TestGetUserByName_OkFalseSurfacesError(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/users.list": fixture("err_missing_scope.json"),
+	})
+
+	if _, err := c.GetUserByName("glinda"); ErrorCode(err) != "missing_scope" {
+		t.Errorf("ErrorCode = %q, want missing_scope", ErrorCode(err))
+	}
+}
+
+// A cursor that never empties would loop forever against a misbehaving API.
+func TestGetUserByName_StopsOnRepeatedCursor(t *testing.T) {
+	c, rec := newTestClient(t, routes{
+		"/api/users.list": fixture("users_list_page1.json"),
+	})
+
+	if _, err := c.GetUserByName("nobody"); err == nil {
+		t.Fatal("expected an error once the scan gives up")
+	}
+	if got := rec.count(); got > 20 {
+		t.Errorf("made %d requests, want a bounded scan", got)
+	}
+}

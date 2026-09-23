@@ -35,6 +35,11 @@ type stubResponse struct {
 	status  int
 	fixture string // filename under testdata/, takes precedence over body
 	body    string // literal response body
+
+	// seq, when non-empty, serves one response per call to this path, in order.
+	// The last entry is repeated once exhausted. Paginated endpoints need this:
+	// users.list answers the same path differently depending on the cursor.
+	seq []stubResponse
 }
 
 // routes maps a Slack endpoint path (e.g. "/api/users.info") to its stub response.
@@ -48,6 +53,11 @@ func fixture(name string) stubResponse {
 // raw serves a literal body with an explicit status, for cases no fixture covers.
 func raw(status int, body string) stubResponse {
 	return stubResponse{status: status, body: body}
+}
+
+// sequence serves the given responses one per request to the same path, in order.
+func sequence(responses ...stubResponse) stubResponse {
+	return stubResponse{seq: responses}
 }
 
 // recordedRequest is one request the stub server received.
@@ -103,6 +113,10 @@ func newTestClient(t *testing.T, rt routes) (*Client, *recorder) {
 
 	rec := &recorder{}
 
+	// calls counts requests per path, so a sequence stub can advance.
+	var seqMu sync.Mutex
+	calls := map[string]int{}
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		bodyBytes, _ := io.ReadAll(req.Body)
 		rec.add(recordedRequest{
@@ -120,6 +134,17 @@ func newTestClient(t *testing.T, rt routes) (*Client, *recorder) {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"ok":false,"error":"unknown_method"}`))
 			return
+		}
+
+		if len(stub.seq) > 0 {
+			seqMu.Lock()
+			i := calls[req.URL.Path]
+			calls[req.URL.Path]++
+			seqMu.Unlock()
+			if i >= len(stub.seq) {
+				i = len(stub.seq) - 1
+			}
+			stub = stub.seq[i]
 		}
 
 		payload := []byte(stub.body)

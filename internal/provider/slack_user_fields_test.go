@@ -18,7 +18,7 @@ func profileAttr(t *testing.T, d *userDataSource, fixtureName, attrName string) 
 	ds := &userDataSource{client: newStubClient(t, map[string]stub{
 		"/api/users.info": fixture(fixtureName),
 	})}
-	resp := readUser(t, ds, userConfig(t, ds, ptr("W012A3CDE"), nil))
+	resp := readUser(t, ds, userConfig(t, ds, ptr("W012A3CDE"), nil, nil))
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
 	}

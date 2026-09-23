@@ -12,6 +12,7 @@ provider "slack" {
   token = "xoxb-1234567890"
 }
 
+# Deprecated, kept here so the deprecation warning is visible in a plan.
 data "slack_user_ids" "this" {
   usernames = ["u1", "u2"]
 }
@@ -21,7 +22,7 @@ resource "slack_message" "this" {
   slack_ids = toset(values(data.slack_user_ids.this.slack_ids))
 }
 
-# slack_user: single-user lookup by ID or email.
+# slack_user: single-user lookup by ID, email, or username.
 data "slack_user" "by_id" {
   id = "W012A3CDE"
 }
@@ -41,4 +42,13 @@ output "user_by_email_id" {
 # Null rather than "" when the token lacks users:read.email.
 output "user_by_id_email" {
   value = data.slack_user.by_id.profile.email
+}
+
+# Lookup by Slack handle -- the replacement for slack_user_ids.
+data "slack_user" "by_name" {
+  name = "u1"
+}
+
+output "user_by_name_id" {
+  value = data.slack_user.by_name.id
 }

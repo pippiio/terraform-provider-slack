@@ -30,6 +30,17 @@ type userResponse struct {
 	User User `json:"user"`
 }
 
+// userListResponse is the envelope returned by users.list.
+//
+// The members are complete user objects, not the id/name pairs UserReponse decodes, so
+// a name scan can answer with the full user without a follow-up users.info call.
+type userListResponse struct {
+	Members          []User `json:"members"`
+	ResponseMetadata struct {
+		NextCursor string `json:"next_cursor"`
+	} `json:"response_metadata"`
+}
+
 // User is a Slack user object.
 //
 // Deliberately omitted, per the track's Non-Goals:

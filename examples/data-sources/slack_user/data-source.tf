@@ -55,3 +55,34 @@ output "all_custom_fields" {
     id => field.value
   }
 }
+
+# Look a user up by their Slack handle (the `name` field), for configurations that only
+# know usernames. This replaces the deprecated `slack_user_ids` data source.
+#
+# Slack has no lookup-by-username endpoint, so this scans `users.list` -- a Tier 2
+# method limited to roughly 20 requests per minute. Prefer `id` or `email` where you
+# have one, and keep `for_each` sets over usernames small.
+data "slack_user" "by_name" {
+  name = "glinda"
+}
+
+output "resolved_id" {
+  value = data.slack_user.by_name.id
+}
+
+# Migrating from `slack_user_ids`:
+#
+#   data "slack_user_ids" "this" {
+#     usernames = ["u1", "u2"]
+#   }
+#   # data.slack_user_ids.this.slack_ids["u1"]
+#
+# becomes:
+data "slack_user" "by_username" {
+  for_each = toset(["u1", "u2"])
+  name     = each.value
+}
+
+output "slack_ids" {
+  value = { for name, u in data.slack_user.by_username : name => u.id }
+}

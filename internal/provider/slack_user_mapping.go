@@ -143,24 +143,56 @@ func userToModel(ctx context.Context, u *slackclient.User) (userDataSourceModel,
 	}, diags
 }
 
+// lookupKind is which of the data source's three selectors was configured. It decides
+// both the wording of a diagnostic and which scope it tells the operator to add.
+type lookupKind int
+
+const (
+	lookupByID lookupKind = iota
+	lookupByEmail
+	lookupByName
+)
+
+// label names the selector as an operator would describe it.
+func (k lookupKind) label() string {
+	switch k {
+	case lookupByID:
+		return "Slack user ID"
+	case lookupByName:
+		return "username"
+	default:
+		return "email address"
+	}
+}
+
+// requiredScope is the scope a missing_scope error is actually asking for. Only the
+// email lookup needs users:read.email; naming it for the others would send the
+// operator to add a scope that changes nothing.
+func (k lookupKind) requiredScope() string {
+	if k == lookupByEmail {
+		return "users:read.email"
+	}
+	return "users:read"
+}
+
 // lookupErrorDiagnostic turns a lookup failure into an actionable message.
 //
 // The point of naming the specific scope or condition is that Slack's raw error codes
 // ("missing_scope") tell an operator nothing about what to change.
-func lookupErrorDiagnostic(err error, lookupByID bool, identifier string) (string, string) {
-	lookupKind := "email address"
-	requiredScope := "users:read.email"
-	if lookupByID {
-		lookupKind = "Slack user ID"
-		requiredScope = "users:read"
-	}
+func lookupErrorDiagnostic(err error, kind lookupKind, identifier string) (string, string) {
+	kindLabel := kind.label()
+	requiredScope := kind.requiredScope()
 
 	switch slackclient.ErrorCode(err) {
 	case "users_not_found":
-		detail := fmt.Sprintf("No Slack user was found for the %s %q.", lookupKind, identifier)
-		if !lookupByID {
+		detail := fmt.Sprintf("No Slack user was found for the %s %q.", kindLabel, identifier)
+		switch kind {
+		case lookupByEmail:
 			detail += "\n\nNote that users.lookupByEmail does not match deactivated accounts. " +
 				"If the user has been deactivated, look them up by `id` instead."
+		case lookupByName:
+			detail += "\n\nThis is the user's Slack handle (the `name` field), which is not " +
+				"always their display name. It is matched exactly and is case-sensitive."
 		}
 		return "Slack user not found", detail
 
@@ -169,7 +201,7 @@ func lookupErrorDiagnostic(err error, lookupByID bool, identifier string) (strin
 			"Looking a user up by %s requires the %q scope, which this token does not have.\n\n"+
 				"Add the scope to your Slack app, reinstall it to the workspace, and use the "+
 				"regenerated token.\n\nUnderlying error: %s",
-			lookupKind, requiredScope, err,
+			kindLabel, requiredScope, err,
 		)
 
 	case "invalid_auth", "not_authed", "token_revoked", "account_inactive":
@@ -177,7 +209,7 @@ func lookupErrorDiagnostic(err error, lookupByID bool, identifier string) (strin
 			"Slack rejected the configured token while looking up the %s %q.\n\n"+
 				"Check the `token` provider attribute or the SLACK_TOKEN environment variable.\n\n"+
 				"Underlying error: %s",
-			lookupKind, identifier, err,
+			kindLabel, identifier, err,
 		)
 
 	case "ratelimited":
@@ -190,7 +222,7 @@ func lookupErrorDiagnostic(err error, lookupByID bool, identifier string) (strin
 
 	default:
 		return "Unable to read Slack user", fmt.Sprintf(
-			"Looking up the %s %q failed: %s", lookupKind, identifier, err,
+			"Looking up the %s %q failed: %s", kindLabel, identifier, err,
 		)
 	}
 }

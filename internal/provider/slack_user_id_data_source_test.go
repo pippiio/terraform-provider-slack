@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -79,5 +80,52 @@ func TestUserIdsDataSource_SurfacesApiErrorAfterA1Fix(t *testing.T) {
 
 	if !resp.Diagnostics.HasError() {
 		t.Fatal("an invalid token must now fail the read instead of returning an empty map")
+	}
+}
+
+// Review feedback: slack_user now resolves usernames too, so this data source is on a
+// removal path. It stays registered and behaviourally unchanged for v1.x -- deleting it
+// here would break every published configuration -- but Terraform must warn on use.
+func TestUserIdsDataSource_IsDeprecatedInFavourOfSlackUser(t *testing.T) {
+	ctx := context.Background()
+	d := &userIdDataSource{}
+
+	resp := &datasource.SchemaResponse{}
+	d.Schema(ctx, datasource.SchemaRequest{}, resp)
+
+	msg := resp.Schema.DeprecationMessage
+	if msg == "" {
+		t.Fatal("slack_user_ids must carry a DeprecationMessage")
+	}
+	if !strings.Contains(msg, "slack_user") {
+		t.Errorf("the deprecation message must point at the replacement, got: %q", msg)
+	}
+}
+
+// A username that resolves to nothing used to be dropped from slack_ids in silence.
+// That is a data-loss path, not a cosmetic one: slack_message treats slack_ids as
+// authoritative, so a shrunken map makes the next apply DELETE the message that user
+// already received. A typo, a renamed account or a deactivated one is enough.
+func TestUserIdsDataSource_UnresolvedUsernameFails(t *testing.T) {
+	ctx := context.Background()
+	d := &userIdDataSource{client: newStubClient(t, map[string]stub{
+		"/api/users.list": fixture("users_list_ok.json"),
+	})}
+
+	cfg := userIdsConfig(t, d, []string{"spengler", "nosuchuser"})
+	objType := cfg.Schema.Type().TerraformType(ctx).(tftypes.Object)
+	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: cfg.Schema, Raw: tftypes.NewValue(objType, nil)}}
+
+	d.Read(ctx, datasource.ReadRequest{Config: cfg}, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("an unresolved username must fail rather than silently shrink slack_ids")
+	}
+	detail := resp.Diagnostics.Errors()[0].Detail()
+	if !strings.Contains(detail, "nosuchuser") {
+		t.Errorf("diagnostic detail = %q, want it to name the unresolved username", detail)
+	}
+	if strings.Contains(detail, "spengler") {
+		t.Errorf("diagnostic detail = %q, should name only what failed to resolve", detail)
 	}
 }
