@@ -42,6 +42,26 @@ data "slack_user" "by_email" {
 #
 # NOTE: `terraform destroy` DISABLES a user group -- Slack has no delete -- and its handle
 # stays reserved afterwards. Re-applying adopts the disabled group and emits a warning.
+#
+# HOW TO SMOKE-TEST THIS REPEATEDLY
+#
+# The reserved handle does not block re-testing; it is what makes re-testing work. The
+# adopt path turns destroy/apply into a loop you can run as many times as you like:
+#
+#   terraform apply     # creates the group
+#   terraform destroy   # disables it -- the group and handle remain in the workspace
+#   terraform apply     # re-enables the SAME group, warns, and restores name, purpose,
+#                       # channels and membership from this configuration
+#
+# What that does and does not prove:
+#   - create, update, membership replace, and the adopt-on-disabled path: all exercised
+#   - a first-ever create against a never-used handle: only the very first run. Change
+#     the handles below to get a clean one again
+#
+# What it leaves behind, permanently: one disabled group per handle, with the handle
+# reserved. Slack offers no delete, through the API or the UI, so this is residue no
+# provider can clean up. Use throwaway handles in a workspace where that is acceptable --
+# hence the `draft-smoke-test` prefix below.
 # ---------------------------------------------------------------------------
 
 # Read an existing group. Bot token is sufficient here.

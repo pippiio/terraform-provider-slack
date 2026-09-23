@@ -266,7 +266,7 @@ func (r *userGroupResource) Create(ctx context.Context, req resource.CreateReque
 					"and updated to match this configuration rather than creating a new one.\n\n"+
 					"Slack never deletes user groups and keeps their handles reserved, so this is the "+
 					"only way to re-create a group that was previously destroyed. Its previous name, "+
-					"description and channels have been overwritten.",
+					"purpose and channels have been overwritten.",
 				handle, existing.ID,
 			),
 		)
