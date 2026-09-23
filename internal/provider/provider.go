@@ -28,7 +28,7 @@ func New(version string) func() provider.Provider {
 	}
 }
 
-// hashicupsProvider is the provider implementation.
+// slackProvider is the provider implementation.
 type slackProvider struct {
 	// version is set to the provider version on release, "dev" when the
 	// provider is built and ran locally, and "test" when running acceptance
@@ -148,6 +148,7 @@ func (p *slackProvider) Configure(ctx context.Context, req provider.ConfigureReq
 func (p *slackProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewUserIdDataSource,
+		NewUserDataSource,
 	}
 }
 

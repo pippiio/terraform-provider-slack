@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "user": {
+    "id": "W012A3CDE",
+    "team_id": "T012AB3C4",
+    "name": "spengler",
+    "deleted": false,
+    "color": "9f69e7",
+    "real_name": "Egon Spengler",
+    "tz": "America/Los_Angeles",
+    "tz_label": "Pacific Daylight Time",
+    "tz_offset": -25200,
+    "profile": {
+      "avatar_hash": "ge3b51ca72de",
+      "real_name": "Egon Spengler",
+      "display_name": "spengler",
+      "real_name_normalized": "Egon Spengler",
+      "display_name_normalized": "spengler",
+      "team": "T012AB3C4"
+    },
+    "is_admin": true,
+    "is_owner": false,
+    "is_primary_owner": false,
+    "is_restricted": false,
+    "is_ultra_restricted": false,
+    "is_bot": false,
+    "is_app_user": false,
+    "is_email_confirmed": true,
+    "has_2fa": false,
+    "updated": 1502138686
+  }
+}

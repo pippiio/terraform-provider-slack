@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "members": [
+    {
+      "id": "W012A3CDE",
+      "team_id": "T012AB3C4",
+      "name": "spengler",
+      "profile": { "real_name": "Egon Spengler", "fields": [] }
+    }
+  ],
+  "response_metadata": { "next_cursor": "dXNlcjpVMDYxTkZUVDI=" }
+}

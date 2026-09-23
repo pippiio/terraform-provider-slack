@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "channel": "C123456789",
+  "messages": [
+    {
+      "ts": "1503435956.000247",
+      "text": "Here's a message for you"
+    }
+  ]
+}

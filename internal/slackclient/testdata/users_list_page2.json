@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "members": [
+    {
+      "id": "W07QCRPA4",
+      "team_id": "T012AB3C4",
+      "name": "glinda",
+      "profile": { "real_name": "Glinda Southgood", "fields": [] }
+    }
+  ],
+  "response_metadata": { "next_cursor": "" }
+}

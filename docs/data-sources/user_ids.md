@@ -3,16 +3,22 @@
 page_title: "slack_user_ids Data Source - slack"
 subcategory: ""
 description: |-
-  
+  Resolves a set of Slack usernames to their user IDs in a single users.list call.
+  Deprecated. Use the slack_user data source, which looks a user up by name and returns the full user object rather than the ID alone. This data source will be removed in v2.0.0.
 ---
 
 # slack_user_ids (Data Source)
 
+Resolves a set of Slack usernames to their user IDs in a single `users.list` call.
 
+**Deprecated.** Use the `slack_user` data source, which looks a user up by `name` and returns the full user object rather than the ID alone. This data source will be removed in v2.0.0.
 
 ## Example Usage
 
 ```terraform
+# Deprecated: this data source will be removed in v2.0.0.
+# Use `slack_user` with the `name` argument instead -- it returns the full user object
+# rather than the ID alone. See examples/data-sources/slack_user.
 data "slack_user_ids" "this" {
   usernames = ["u1", "u2"]
 }
@@ -27,5 +33,5 @@ data "slack_user_ids" "this" {
 
 ### Read-Only
 
-- `last_updated` (String)
+- `last_updated` (String) Timestamp of the read, as a formatted string. Carries no useful information: a data source is re-read on every plan, so this is always the current time, and referencing it forces anything downstream to change on every run. It is retained only because removing an attribute would break configurations that read it, and goes away with this data source in v2.0.0.
 - `slack_ids` (Map of String) The map of usernames and userids
