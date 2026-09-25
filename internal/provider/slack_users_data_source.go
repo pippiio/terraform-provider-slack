@@ -31,6 +31,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/datasourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -197,10 +198,145 @@ func (d *usersDataSource) Configure(_ context.Context, req datasource.ConfigureR
 }
 
 func (d *usersDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	// Implemented in Task 3.5. Failing loudly rather than writing empty state keeps a
-	// half-built data source from looking like one that matched nothing.
-	resp.Diagnostics.AddError(
-		"slack_users Read is not implemented yet",
-		"This data source is still being built; see track slack-users-data-source, Task 3.5.",
-	)
+	var config usersDataSourceModel
+
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	selector, diags := d.buildSelector(ctx, config)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// One scan, however many users come back. The selector decides what to keep as each
+	// page arrives, so an input list that is satisfied early stops the walk there.
+	matched := make(map[string]*slackclient.User)
+	satisfied := make(map[string]struct{})
+	wanted := selector.inputCount()
+
+	err := d.client.ScanUsers(func(members []slackclient.User) bool {
+		for i := range members {
+			u := &members[i]
+			input, ok := selector.match(u)
+			if !ok {
+				continue
+			}
+			matched[u.ID] = u
+			if input != "" {
+				satisfied[input] = struct{}{}
+			}
+		}
+		// Only an input-driven selector can finish early: proving a *miss* still
+		// requires reading every page.
+		return wanted > 0 && len(satisfied) == wanted
+	})
+	if err != nil {
+		summary, detail := usersScanErrorDiagnostic(err)
+		resp.Diagnostics.AddError(summary, detail)
+		return
+	}
+
+	errorOnNoMatch := config.ErrorOnNoMatch.IsNull() || config.ErrorOnNoMatch.ValueBool()
+
+	// FR-5: unresolved is judged on what matched, before filtering. An input naming a
+	// real account that a filter then removed is an empty result, not a missing user.
+	if errorOnNoMatch {
+		if missing := selector.unresolved(satisfied); len(missing) > 0 {
+			summary, detail := unresolvedInputsDiagnostic(missing, config)
+			resp.Diagnostics.AddError(summary, detail)
+			return
+		}
+	}
+
+	filters := filtersFrom(config)
+	kept := make([]*slackclient.User, 0, len(matched))
+	for _, u := range matched {
+		if filters.keep(u) {
+			kept = append(kept, u)
+		}
+	}
+
+	if errorOnNoMatch && len(kept) == 0 {
+		resp.Diagnostics.AddError(
+			"No Slack users matched",
+			"The selector and filters together matched no users.\n\n"+
+				"Set `error_on_no_match = false` if an empty result is a legitimate state "+
+				"here -- a channel whose members are all bots, for instance, when "+
+				"`is_bot = false` is set.",
+		)
+		return
+	}
+
+	state := config
+	state.Users, state.UserIDs, state.UserCount, diags = usersToState(ctx, kept)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// buildSelector turns the config into a selector, resolving a container if one was set.
+func (d *usersDataSource) buildSelector(ctx context.Context, config usersDataSourceModel) (userSelector, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	sel := userSelector{}
+
+	if !config.Emails.IsNull() {
+		var emails []string
+		diags.Append(config.Emails.ElementsAs(ctx, &emails, false)...)
+		sel.wantEmails = make(map[string]string, len(emails))
+		for _, e := range emails {
+			sel.wantEmails[normaliseEmail(e)] = e
+		}
+	}
+
+	if !config.Usernames.IsNull() {
+		var names []string
+		diags.Append(config.Usernames.ElementsAs(ctx, &names, false)...)
+		sel.wantNames = make(map[string]struct{}, len(names))
+		for _, n := range names {
+			sel.wantNames[n] = struct{}{}
+		}
+	}
+
+	if !config.Channel.IsNull() {
+		channel := config.Channel.ValueString()
+		members, err := d.client.ListChannelMembers(channel)
+		if err != nil {
+			summary, detail := channelErrorDiagnostic(err, channel)
+			diags.AddError(summary, detail)
+			return sel, diags
+		}
+		sel.hasContainer = true
+		sel.containerIDs = make(map[string]struct{}, len(members))
+		for _, id := range members {
+			sel.containerIDs[id] = struct{}{}
+		}
+	}
+
+	return sel, diags
+}
+
+// filtersFrom lifts the tri-state filters out of the config. A null attribute stays a
+// nil pointer, which is what "not configured" means to userFilters.
+func filtersFrom(config usersDataSourceModel) userFilters {
+	tri := func(b types.Bool) *bool {
+		if b.IsNull() || b.IsUnknown() {
+			return nil
+		}
+		v := b.ValueBool()
+		return &v
+	}
+	return userFilters{
+		isBot:             tri(config.IsBot),
+		deleted:           tri(config.Deleted),
+		isRestricted:      tri(config.IsRestricted),
+		isUltraRestricted: tri(config.IsUltraRestricted),
+		isAdmin:           tri(config.IsAdmin),
+		isAppUser:         tri(config.IsAppUser),
+	}
 }

@@ -199,7 +199,7 @@ func (c *Client) DeleteMessage(channel_ID, ts string) error {
 func (c *Client) ReadUserIds() (*UserReponse, error) {
 	res := UserReponse{}
 
-	err := c.scanUsers(func(members []User) bool {
+	err := c.ScanUsers(func(members []User) bool {
 		for _, m := range members {
 			res.Members = append(res.Members, MembersData{Id: m.ID, Name: m.Name})
 		}
@@ -352,10 +352,15 @@ func (c *Client) pageThrough(
 	return nil
 }
 
-// scanUsers walks every page of users.list, handing each page's members to visit.
+// ScanUsers walks every page of users.list, handing each page's members to visit.
 //
 // visit returns true to stop early. See pageThrough for the paging rules.
-func (c *Client) scanUsers(visit func(members []User) bool) error {
+//
+// Exported for the provider layer: slack_users needs the same walk, and needs the
+// early stop with it. A ListUsers() returning everything would be a simpler signature
+// and would throw that away -- a username matched on page one would still cost a read
+// of the whole workspace.
+func (c *Client) ScanUsers(visit func(members []User) bool) error {
 	return c.pageThrough("users.list", nil, func(body []byte) (string, bool, error) {
 		res := userListResponse{}
 		if err := json.Unmarshal(body, &res); err != nil {
@@ -384,7 +389,7 @@ func (c *Client) scanUsers(visit func(members []User) bool) error {
 func (c *Client) GetUserByName(name string) (*User, error) {
 	var found *User
 
-	err := c.scanUsers(func(members []User) bool {
+	err := c.ScanUsers(func(members []User) bool {
 		for i := range members {
 			if members[i].Name == name {
 				found = &members[i]

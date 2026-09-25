@@ -1,0 +1,61 @@
+{
+  "ok": true,
+  "members": [
+    {
+      "id": "W012A3CDE",
+      "team_id": "T012AB3C4",
+      "name": "spengler",
+      "deleted": false,
+      "real_name": "Egon Spengler",
+      "is_bot": false,
+      "is_admin": true,
+      "profile": {
+        "real_name": "Egon Spengler",
+        "display_name": "spengler",
+        "email": "Spengler@Ghostbusters.example.com",
+        "title": "Paranormal Investigator",
+        "fields": []
+      }
+    },
+    {
+      "id": "W07QCRPA4",
+      "team_id": "T012AB3C4",
+      "name": "glinda",
+      "deleted": false,
+      "real_name": "Glinda Southgood",
+      "is_bot": false,
+      "is_restricted": true,
+      "profile": {
+        "real_name": "Glinda Southgood",
+        "display_name": "Glinda the Good",
+        "email": "glinda@south.oz.example.com",
+        "fields": []
+      }
+    },
+    {
+      "id": "B01BOT0001",
+      "team_id": "T012AB3C4",
+      "name": "buildbot",
+      "deleted": false,
+      "is_bot": true,
+      "profile": {
+        "real_name": "Build Bot",
+        "bot_id": "B01BOT0001",
+        "fields": []
+      }
+    },
+    {
+      "id": "W0DEACT001",
+      "team_id": "T012AB3C4",
+      "name": "ghost",
+      "deleted": true,
+      "is_bot": false,
+      "profile": {
+        "real_name": "Departed Colleague",
+        "email": "ghost@ghostbusters.example.com",
+        "fields": []
+      }
+    }
+  ],
+  "response_metadata": { "next_cursor": "" }
+}
