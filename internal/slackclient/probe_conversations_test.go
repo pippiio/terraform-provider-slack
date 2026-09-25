@@ -176,15 +176,19 @@ func TestProbe_ConversationsMembers(t *testing.T) {
 	for _, id := range allMembers {
 		_, _, ub := call("users.info", map[string]string{"user": id})
 		var ur struct {
-			Ok   bool `json:"ok"`
-			User struct {
+			Ok    bool   `json:"ok"`
+			Error string `json:"error"`
+			User  struct {
 				Name    string `json:"name"`
 				IsBot   bool   `json:"is_bot"`
 				Deleted bool   `json:"deleted"`
 			} `json:"user"`
 		}
 		if err := json.Unmarshal([]byte(ub), &ur); err != nil || !ur.Ok {
-			t.Logf("could not classify %s: %s", id, ub)
+			// Deliberately log the error code, never the body: a users.info response
+			// carries a real person's profile, email included when the token is scoped
+			// for it, and test logs are not the place for that.
+			t.Logf("could not classify %s: slack error %q", id, ur.Error)
 			continue
 		}
 		classified++
