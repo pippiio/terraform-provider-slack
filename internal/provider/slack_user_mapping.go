@@ -226,3 +226,55 @@ func lookupErrorDiagnostic(err error, kind lookupKind, identifier string) (strin
 		)
 	}
 }
+
+// userAttrTypes is the Terraform type of one whole user, mirroring userDataSourceModel.
+//
+// It exists so slack_users can declare its map's element type without restating the
+// object. The two MUST stay in step: ObjectValueFrom reflects over the model's tfsdk
+// tags, so a key here that the model does not declare -- or vice versa -- fails at
+// runtime on every read. TestUserAttrTypes_MatchesModelExactly pins that.
+func userAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":      types.StringType,
+		"email":   types.StringType,
+		"team_id": types.StringType,
+		"name":    types.StringType,
+
+		"real_name": types.StringType,
+		"deleted":   types.BoolType,
+		"color":     types.StringType,
+		"tz":        types.StringType,
+		"tz_label":  types.StringType,
+		"tz_offset": types.Int64Type,
+
+		"is_admin":            types.BoolType,
+		"is_owner":            types.BoolType,
+		"is_primary_owner":    types.BoolType,
+		"is_restricted":       types.BoolType,
+		"is_ultra_restricted": types.BoolType,
+		"is_bot":              types.BoolType,
+		"is_app_user":         types.BoolType,
+		"is_email_confirmed":  types.BoolType,
+		"has_2fa":             types.BoolType,
+
+		"updated": types.Int64Type,
+		"profile": types.ObjectType{AttrTypes: profileAttrTypes()},
+	}
+}
+
+// userToObject renders a Slack user as the object slack_users nests in its map.
+//
+// It deliberately goes through userToModel rather than mapping the fields a second
+// time. That mapping is the thing worth not duplicating -- it carries the null-vs-empty
+// discipline the whole data source rests on -- and ObjectValueFrom can build the object
+// from the model's tfsdk tags without it being restated.
+func userToObject(ctx context.Context, u *slackclient.User) (types.Object, diag.Diagnostics) {
+	model, diags := userToModel(ctx, u)
+	if diags.HasError() {
+		return types.ObjectNull(userAttrTypes()), diags
+	}
+
+	obj, d := types.ObjectValueFrom(ctx, userAttrTypes(), model)
+	diags.Append(d...)
+	return obj, diags
+}
