@@ -51,6 +51,11 @@ func (c *Client) doRequest(req *http.Request) ([]byte, error) {
 	}
 	defer resRaw.Body.Close()
 
+	// Record the granted scopes from every response, including failures: Slack sends
+	// the header on ok:false too, and a missing-scope diagnostic is exactly when the
+	// caller most wants to know what the token actually holds.
+	c.recordScopes(resRaw.Header)
+
 	body, err := io.ReadAll(resRaw.Body)
 	if err != nil {
 		return nil, err

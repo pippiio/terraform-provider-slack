@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -281,5 +282,143 @@ func TestReadUserIds_StopsOnRepeatedCursor(t *testing.T) {
 	}
 	if got := rec.count(); got > 20 {
 		t.Errorf("made %d requests, want a bounded scan", got)
+	}
+}
+
+// FR-9: the client records the scopes Slack reports, so the provider can tell "this
+// token cannot see emails" from "this user has no email". The distinction that matters
+// is three-way, not two: granted, not granted, and not yet known.
+
+func TestClient_ScopesUnknownBeforeAnyCall(t *testing.T) {
+	c, _ := newTestClient(t, routes{})
+
+	_, known := c.GrantedScopes()
+	if known {
+		t.Error("scopes must be unknown before any call; FR-9 falls back to inference when they are")
+	}
+}
+
+func TestDoRequest_RecordsOAuthScopes(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/users.list": withHeaders(
+			fixture("users_list_ok.json"),
+			map[string]string{"X-OAuth-Scopes": "users:read,users:read.email,chat:write"},
+		),
+	})
+
+	if _, err := c.ReadUserIds(); err != nil {
+		t.Fatalf("ReadUserIds returned error: %v", err)
+	}
+
+	scopes, known := c.GrantedScopes()
+	if !known {
+		t.Fatal("scopes must be known after a response carrying the header")
+	}
+	for _, want := range []string{"users:read", "users:read.email", "chat:write"} {
+		if !scopes[want] {
+			t.Errorf("scope %q missing from %v", want, scopes)
+		}
+	}
+	if scopes["usergroups:write"] {
+		t.Error("a scope Slack did not grant must not appear")
+	}
+}
+
+// A token genuinely without the scope is the case FR-9 fails a read on, so "known and
+// absent" has to be distinguishable from "unknown".
+func TestDoRequest_RecordsScopesWithoutEmailScope(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/users.list": withHeaders(
+			fixture("users_list_ok.json"),
+			map[string]string{"X-OAuth-Scopes": "users:read"},
+		),
+	})
+
+	if _, err := c.ReadUserIds(); err != nil {
+		t.Fatalf("ReadUserIds returned error: %v", err)
+	}
+
+	scopes, known := c.GrantedScopes()
+	if !known {
+		t.Fatal("a header listing one scope still means the scopes are known")
+	}
+	if scopes["users:read.email"] {
+		t.Error("users:read.email must not be reported as granted")
+	}
+}
+
+// If Slack sends no header, the probe's negative case, scopes stay unknown and the
+// provider must not conclude the scope is missing.
+func TestDoRequest_NoScopeHeaderLeavesScopesUnknown(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/users.list": fixture("users_list_ok.json"),
+	})
+
+	if _, err := c.ReadUserIds(); err != nil {
+		t.Fatalf("ReadUserIds returned error: %v", err)
+	}
+
+	if _, known := c.GrantedScopes(); known {
+		t.Error("no header must leave scopes unknown, not empty-and-known")
+	}
+}
+
+// Slack's own examples space-pad the list; a scope must not be recorded as " chat:write".
+func TestDoRequest_ScopeHeaderIsTrimmed(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/users.list": withHeaders(
+			fixture("users_list_ok.json"),
+			map[string]string{"X-OAuth-Scopes": "users:read, users:read.email , chat:write"},
+		),
+	})
+
+	if _, err := c.ReadUserIds(); err != nil {
+		t.Fatalf("ReadUserIds returned error: %v", err)
+	}
+
+	scopes, _ := c.GrantedScopes()
+	if !scopes["users:read.email"] {
+		t.Errorf("padded scope was not trimmed: %v", scopes)
+	}
+}
+
+// The scope fields are the client's only mutable state, written from doRequest and read
+// from the provider. One apply resolves many data sources, so both happen concurrently.
+// Without this the race detector has nothing to detect: no other test calls doRequest
+// from more than one goroutine.
+func TestDoRequest_ScopeRecordingIsRaceFree(t *testing.T) {
+	c, _ := newTestClient(t, routes{
+		"/api/users.list": withHeaders(
+			fixture("users_list_ok.json"),
+			map[string]string{"X-OAuth-Scopes": "users:read,users:read.email"},
+		),
+	})
+
+	const goroutines = 16
+	var wg sync.WaitGroup
+	wg.Add(goroutines * 2)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			if _, err := c.ReadUserIds(); err != nil {
+				t.Errorf("ReadUserIds: %v", err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			// Reading the returned map must be safe even while writers are running --
+			// which is why GrantedScopes hands back a copy rather than the live map.
+			scopes, known := c.GrantedScopes()
+			if known {
+				_ = scopes["users:read.email"]
+			}
+		}()
+	}
+	wg.Wait()
+
+	scopes, known := c.GrantedScopes()
+	if !known || !scopes["users:read.email"] {
+		t.Errorf("after %d concurrent calls, scopes = %v known = %v", goroutines, scopes, known)
 	}
 }

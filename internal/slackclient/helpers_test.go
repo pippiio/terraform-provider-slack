@@ -40,6 +40,10 @@ type stubResponse struct {
 	// The last entry is repeated once exhausted. Paginated endpoints need this:
 	// users.list answers the same path differently depending on the cursor.
 	seq []stubResponse
+
+	// headers are set on the response. Slack reports the token's scopes this way,
+	// so anything asserting on them needs to control it.
+	headers map[string]string
 }
 
 // routes maps a Slack endpoint path (e.g. "/api/users.info") to its stub response.
@@ -53,6 +57,12 @@ func fixture(name string) stubResponse {
 // raw serves a literal body with an explicit status, for cases no fixture covers.
 func raw(status int, body string) stubResponse {
 	return stubResponse{status: status, body: body}
+}
+
+// withHeaders copies a stub, adding response headers to it.
+func withHeaders(base stubResponse, headers map[string]string) stubResponse {
+	base.headers = headers
+	return base
 }
 
 // sequence serves the given responses one per request to the same path, in order.
@@ -159,6 +169,9 @@ func newTestClient(t *testing.T, rt routes) (*Client, *recorder) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		for k, v := range stub.headers {
+			w.Header().Set(k, v)
+		}
 		w.WriteHeader(stub.status)
 		_, _ = w.Write(payload)
 	}))
