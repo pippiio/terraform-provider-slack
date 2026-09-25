@@ -7,8 +7,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"terraform-provider-slack/internal/slackclient"
@@ -22,20 +24,96 @@ type stub struct {
 	status  int
 	fixture string
 	body    string
+
+	// seq, when non-empty, serves one response per call to this path, in order, with
+	// the last entry repeated once exhausted. Paginated endpoints need it.
+	seq []stub
 }
+
+// sequence serves the given responses one per request to the same path, in order.
+func sequence(responses ...stub) stub { return stub{seq: responses} }
 
 func fixture(name string) stub { return stub{status: http.StatusOK, fixture: name} }
 
 func raw(status int, body string) stub { return stub{status: status, body: body} }
+
+// stubRequest is one request the stub server received.
+type stubRequest struct {
+	Path  string
+	Query url.Values
+}
+
+// stubRecorder collects requests, so a test can assert on what the provider sent and
+// not only on what it did with the reply. Safe for concurrent handler goroutines.
+type stubRecorder struct {
+	mu   sync.Mutex
+	reqs []stubRequest
+}
+
+func (r *stubRecorder) add(req stubRequest) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reqs = append(r.reqs, req)
+}
+
+// countPath returns how many requests hit a path -- the only way to assert that a scan
+// stopped early rather than reading pages it did not need.
+func (r *stubRecorder) countPath(path string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, req := range r.reqs {
+		if req.Path == path {
+			n++
+		}
+	}
+	return n
+}
+
+// find returns the first request to path.
+func (r *stubRecorder) find(path string) (stubRequest, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, req := range r.reqs {
+		if req.Path == path {
+			return req, true
+		}
+	}
+	return stubRequest{}, false
+}
 
 // newStubClient starts a stub Slack server and returns a client pointed at it.
 // Fixtures are read from the slackclient package's testdata directory so both packages
 // assert against the same recorded responses.
 func newStubClient(t *testing.T, rt map[string]stub) *slackclient.Client {
 	t.Helper()
+	c, _ := newRecordingStubClient(t, rt)
+	return c
+}
+
+// newRecordingStubClient is newStubClient plus a record of every request.
+func newRecordingStubClient(t *testing.T, rt map[string]stub) (*slackclient.Client, *stubRecorder) {
+	t.Helper()
+
+	rec := &stubRecorder{}
+
+	var seqMu sync.Mutex
+	calls := map[string]int{}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		rec.add(stubRequest{Path: req.URL.Path, Query: req.URL.Query()})
+
 		s, ok := rt[req.URL.Path]
+		if ok && len(s.seq) > 0 {
+			seqMu.Lock()
+			i := calls[req.URL.Path]
+			calls[req.URL.Path]++
+			seqMu.Unlock()
+			if i >= len(s.seq) {
+				i = len(s.seq) - 1
+			}
+			s = s.seq[i]
+		}
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"ok":false,"error":"unknown_method"}`))
@@ -62,7 +140,7 @@ func newStubClient(t *testing.T, rt map[string]stub) *slackclient.Client {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	return c
+	return c, rec
 }
 
 // msgMapObjectType is the tftypes shape of one msg_map entry.
