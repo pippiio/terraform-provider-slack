@@ -279,35 +279,48 @@ func (c *Client) GetUserByEmail(email string) (*User, error) {
 	return &res.User, nil
 }
 
-// usersListPageLimit is the page size requested from users.list. Slack's documented
-// maximum is 1000 but it recommends no more than 200; larger pages are more likely to
-// time out on the Slack side, which costs a whole page rather than part of one.
-const usersListPageLimit = 200
+// slackListPageLimit is the page size requested from every cursor-paginated list
+// endpoint. Slack's documented maximum is 1000 but it recommends no more than 200;
+// larger pages are more likely to time out on the Slack side, which costs a whole page
+// rather than part of one.
+const slackListPageLimit = 200
 
-// usersListMaxPages bounds a scan. At the page limit above this covers 100k members,
-// past any real workspace, and stops a malformed cursor from looping forever.
-const usersListMaxPages = 500
+// slackListMaxPages bounds a paginated scan. At the page limit above this covers 100k
+// records, past any real workspace, and stops a malformed cursor from looping forever.
+const slackListMaxPages = 500
 
-// scanUsers walks every page of users.list, handing each page's members to visit.
+// pageThrough walks a cursor-paginated Slack list endpoint, handing each page's raw
+// body to visit.
 //
-// visit returns true to stop early, which is what a lookup wants: a name matched on the
-// first page should not cost a read of the whole workspace. users.list is a Tier 2
-// method (~20 requests/minute), so pages are worth not fetching.
+// visit decodes the page in whatever shape that endpoint uses and returns the cursor to
+// continue from. Returning stop=true ends the walk early, which a lookup wants: a match
+// on the first page should not cost a read of the whole workspace.
 //
-// The scan ends on an empty next_cursor, on a cursor Slack repeats (it is not
-// advancing, and continuing would loop), or at usersListMaxPages.
-func (c *Client) scanUsers(visit func(members []User) bool) error {
+// The walk ends on an empty next_cursor, on a cursor Slack repeats -- it is not
+// advancing, and continuing would loop -- or at slackListMaxPages.
+//
+// This exists because guardrail A-8 was earned: users.list shipped with no cursor and no
+// limit, so every record past the first page was invisible. Centralising the loop makes
+// the next list endpoint paginated by default rather than by whoever remembers.
+func (c *Client) pageThrough(
+	endpoint string,
+	params map[string]string,
+	visit func(body []byte) (nextCursor string, stop bool, err error),
+) error {
 	cursor := ""
 
-	for page := 0; page < usersListMaxPages; page++ {
-		req, err := http.NewRequest("GET", fmt.Sprintf("%s/api/users.list", c.Host), nil)
+	for page := 0; page < slackListMaxPages; page++ {
+		req, err := http.NewRequest("GET", fmt.Sprintf("%s/api/%s", c.Host, endpoint), nil)
 		if err != nil {
 			return err
 		}
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
 
 		q := req.URL.Query()
-		q.Add("limit", strconv.Itoa(usersListPageLimit))
+		q.Add("limit", strconv.Itoa(slackListPageLimit))
+		for k, v := range params {
+			q.Add(k, v)
+		}
 		if cursor != "" {
 			q.Add("cursor", cursor)
 		}
@@ -318,16 +331,13 @@ func (c *Client) scanUsers(visit func(members []User) bool) error {
 			return err
 		}
 
-		res := userListResponse{}
-		if err := json.Unmarshal(body, &res); err != nil {
+		next, stop, err := visit(body)
+		if err != nil {
 			return err
 		}
-
-		if visit(res.Members) {
+		if stop {
 			return nil
 		}
-
-		next := res.ResponseMetadata.NextCursor
 		if next == "" || next == cursor {
 			return nil
 		}
@@ -335,6 +345,22 @@ func (c *Client) scanUsers(visit func(members []User) bool) error {
 	}
 
 	return nil
+}
+
+// scanUsers walks every page of users.list, handing each page's members to visit.
+//
+// visit returns true to stop early. See pageThrough for the paging rules.
+func (c *Client) scanUsers(visit func(members []User) bool) error {
+	return c.pageThrough("users.list", nil, func(body []byte) (string, bool, error) {
+		res := userListResponse{}
+		if err := json.Unmarshal(body, &res); err != nil {
+			return "", false, err
+		}
+		if visit(res.Members) {
+			return "", true, nil
+		}
+		return res.ResponseMetadata.NextCursor, false, nil
+	})
 }
 
 // GetUserByName looks a user up by their Slack handle (the `name` field).
