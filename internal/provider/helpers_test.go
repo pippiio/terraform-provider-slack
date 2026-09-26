@@ -28,10 +28,20 @@ type stub struct {
 	// seq, when non-empty, serves one response per call to this path, in order, with
 	// the last entry repeated once exhausted. Paginated endpoints need it.
 	seq []stub
+
+	// headers are set on the response.
+	headers map[string]string
 }
 
 // sequence serves the given responses one per request to the same path, in order.
 func sequence(responses ...stub) stub { return stub{seq: responses} }
+
+// withHeaders copies a stub, adding response headers. Slack reports the token's scopes
+// that way, so anything exercising FR-9 needs to control them.
+func withHeaders(base stub, headers map[string]string) stub {
+	base.headers = headers
+	return base
+}
 
 func fixture(name string) stub { return stub{status: http.StatusOK, fixture: name} }
 
@@ -129,6 +139,9 @@ func newRecordingStubClient(t *testing.T, rt map[string]stub) (*slackclient.Clie
 			payload = b
 		}
 		w.Header().Set("Content-Type", "application/json")
+		for k, v := range s.headers {
+			w.Header().Set(k, v)
+		}
 		w.WriteHeader(s.status)
 		_, _ = w.Write(payload)
 	}))

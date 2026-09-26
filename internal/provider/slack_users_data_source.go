@@ -216,10 +216,26 @@ func (d *usersDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	matched := make(map[string]*slackclient.User)
 	satisfied := make(map[string]struct{})
 	wanted := selector.inputCount()
+	needsEmail := !config.Emails.IsNull()
+	sawAnyEmail := false
+	scopeErr := false
 
 	err := d.client.ScanUsers(func(members []slackclient.User) bool {
+		// FR-9 authoritative path. Checked per page rather than up front because the
+		// scopes only become known once Slack has answered something: the first page is
+		// the earliest possible moment, and every page after it would be wasted.
+		if needsEmail && !scopeErr {
+			if scopes, known := d.client.GrantedScopes(); known && !scopes[emailScope] {
+				scopeErr = true
+				return true
+			}
+		}
+
 		for i := range members {
 			u := &members[i]
+			if u.Profile.Email != nil && *u.Profile.Email != "" {
+				sawAnyEmail = true
+			}
 			input, ok := selector.match(u)
 			if !ok {
 				continue
@@ -239,13 +255,19 @@ func (d *usersDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		return
 	}
 
+	if scopeErr {
+		summary, detail := missingEmailScopeDiagnostic()
+		resp.Diagnostics.AddError(summary, detail)
+		return
+	}
+
 	errorOnNoMatch := config.ErrorOnNoMatch.IsNull() || config.ErrorOnNoMatch.ValueBool()
 
 	// FR-5: unresolved is judged on what matched, before filtering. An input naming a
 	// real account that a filter then removed is an empty result, not a missing user.
 	if errorOnNoMatch {
 		if missing := selector.unresolved(satisfied); len(missing) > 0 {
-			summary, detail := unresolvedInputsDiagnostic(missing, config)
+			summary, detail := unresolvedInputsDiagnostic(missing, config, sawAnyEmail)
 			resp.Diagnostics.AddError(summary, detail)
 			return
 		}
