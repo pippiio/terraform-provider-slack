@@ -107,3 +107,75 @@ func TestUserToObject_PreservesNulls(t *testing.T) {
 		t.Errorf("email = %s, want null when Slack omitted it", got)
 	}
 }
+
+// --- FR-14 / Task 4.3: the email-null warning ------------------------------------
+//
+// profile.email is null for two unrelated reasons: this user has no email, or the token
+// cannot see emails. Slack does not distinguish them -- it omits the field either way --
+// so before the scope capture landed there was nothing to tell an operator.
+
+func TestUserRead_WarnsWhenEmailIsNullOnlyBecauseOfTheScope(t *testing.T) {
+	d := &userDataSource{client: newStubClient(t, map[string]stub{
+		"/api/users.info": withHeaders(
+			fixture("users_info_no_email_scope.json"),
+			map[string]string{"X-OAuth-Scopes": "users:read,chat:write"},
+		),
+	})}
+	resp := readUser(t, d, userConfig(t, d, ptr("W012A3CDE"), nil, nil))
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("a missing email scope must not fail the read: %v", resp.Diagnostics)
+	}
+	if resp.Diagnostics.WarningsCount() == 0 {
+		t.Fatal("expected a warning explaining why email is null")
+	}
+	w := resp.Diagnostics.Warnings()[0]
+	if !strings.Contains(w.Detail(), "users:read.email") {
+		t.Errorf("the warning must name the scope: %s", w.Detail())
+	}
+}
+
+// The inference case must stay silent. Slack reporting nothing about scopes is not
+// evidence the scope is missing, and a warning here would fire on every correctly
+// scoped workspace whose users simply have no email set.
+func TestUserRead_DoesNotWarnWhenScopesAreUnknown(t *testing.T) {
+	d := &userDataSource{client: newStubClient(t, map[string]stub{
+		"/api/users.info": fixture("users_info_no_email_scope.json"),
+	})}
+	resp := readUser(t, d, userConfig(t, d, ptr("W012A3CDE"), nil, nil))
+
+	if resp.Diagnostics.WarningsCount() != 0 {
+		t.Errorf("scopes are unknown here, so nothing can be concluded: %v", resp.Diagnostics.Warnings())
+	}
+}
+
+// Scope held and the user simply has no email: also silent. That is a fact about the
+// user, not a problem to report.
+func TestUserRead_DoesNotWarnWhenScopeIsHeld(t *testing.T) {
+	d := &userDataSource{client: newStubClient(t, map[string]stub{
+		"/api/users.info": withHeaders(
+			fixture("users_info_no_email_scope.json"),
+			map[string]string{"X-OAuth-Scopes": "users:read,users:read.email"},
+		),
+	})}
+	resp := readUser(t, d, userConfig(t, d, ptr("W012A3CDE"), nil, nil))
+
+	if resp.Diagnostics.WarningsCount() != 0 {
+		t.Errorf("the scope is held, so a null email is just a user without one: %v", resp.Diagnostics.Warnings())
+	}
+}
+
+// A user who does have an email must never trigger it, scope state notwithstanding.
+func TestUserRead_DoesNotWarnWhenEmailIsPresent(t *testing.T) {
+	d := &userDataSource{client: newStubClient(t, map[string]stub{
+		"/api/users.info": withHeaders(
+			fixture("users_info_full.json"),
+			map[string]string{"X-OAuth-Scopes": "users:read"},
+		),
+	})}
+	resp := readUser(t, d, userConfig(t, d, ptr("W012A3CDE"), nil, nil))
+
+	if resp.Diagnostics.WarningsCount() != 0 {
+		t.Errorf("email came through, so there is nothing to warn about: %v", resp.Diagnostics.Warnings())
+	}
+}

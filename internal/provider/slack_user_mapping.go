@@ -278,3 +278,46 @@ func userToObject(ctx context.Context, u *slackclient.User) (types.Object, diag.
 	diags.Append(d...)
 	return obj, diags
 }
+
+// emailScopeWarning explains a null email when, and only when, the token is positively
+// known to lack the scope that populates it.
+//
+// profile.email is null for two unrelated reasons -- this user has no email, or the
+// token cannot see any -- and Slack omits the field either way, so the attribute alone
+// cannot tell them apart. The scope header can, when Slack sends it.
+//
+// Deliberately silent in the other two cases. If Slack reported no scopes, nothing is
+// known and inferring from silence would warn on every correctly-scoped workspace whose
+// users simply have no address set. If the scope is held, a null email is a fact about
+// the user rather than a problem.
+//
+// One warning per data source instance: a configuration with fifty slack_user blocks and
+// no scope produces fifty. That is proportionate to the problem and stops the moment the
+// scope is added, but it is why this fires only on certainty.
+func emailScopeWarning(c *slackclient.Client, u *slackclient.User) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	if u.Profile.Email != nil {
+		return diags
+	}
+
+	scopes, known := c.GrantedScopes()
+	if !known || scopes[emailScope] {
+		return diags
+	}
+
+	diags.AddWarning(
+		"Slack user email is unavailable, not absent",
+		fmt.Sprintf(
+			"`email` and `profile.email` are null for %q because this token does not hold "+
+				"the %q scope, which Slack has confirmed. Slack omits the field entirely "+
+				"rather than reporting an error, so a null here does not mean the user has "+
+				"no email address.\n\n"+
+				"Add the scope to your Slack app, reinstall it to the workspace, and use the "+
+				"regenerated token. If you do not need the address, this warning is safe to "+
+				"ignore.",
+			u.Name, emailScope,
+		),
+	)
+	return diags
+}
