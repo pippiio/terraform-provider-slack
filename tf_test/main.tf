@@ -52,3 +52,42 @@ data "slack_user" "by_name" {
 output "user_by_name_id" {
   value = data.slack_user.by_name.id
 }
+
+# ---------------------------------------------------------------------------
+# slack_users: plural query with selectors and filters.
+#
+# Each read costs one paginated users.list pass, so keep an eye on how many of these
+# a single plan resolves. Needs users:read; users:read.email for the emails selector;
+# channels:read (or groups:read plus membership) for the channel selector.
+# ---------------------------------------------------------------------------
+
+# No selector: the whole workspace, filtered down to active humans.
+data "slack_users" "humans" {
+  is_bot  = false
+  deleted = false
+}
+
+# Bulk username resolution -- the replacement for slack_user_ids.
+data "slack_users" "by_username" {
+  usernames = ["u1", "u2"]
+}
+
+# Channel membership. Replace with a real channel ID before running.
+data "slack_users" "channel_members" {
+  channel           = "C012AB3CD"
+  is_bot            = false
+  error_on_no_match = false
+}
+
+output "human_count" {
+  value = data.slack_users.humans.user_count
+}
+
+output "usernames_to_ids" {
+  value = { for id, u in data.slack_users.by_username.users : u.name => id }
+}
+
+# The full object is available, not just the ID.
+output "human_timezones" {
+  value = { for id, u in data.slack_users.humans.users : u.name => u.tz }
+}

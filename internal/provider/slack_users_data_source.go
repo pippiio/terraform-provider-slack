@@ -131,9 +131,9 @@ func (d *usersDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 					"which covers two cases: an email or username that matched no account, " +
 					"named individually; and an empty result after filtering.\n\n" +
 					"Note the default makes a channel filtered down to zero matches an error. " +
-					"Set `false` where an empty result is a legitimate state. A channel or " +
-					"user group that does not exist is always an error, either way — that is a " +
-					"broken reference, not an empty set.",
+					"Set `false` where an empty result is a legitimate state. A channel that " +
+					"does not exist is always an error either way — that is a broken reference, " +
+					"not an empty set.",
 				Optional: true,
 			},
 
@@ -173,7 +173,9 @@ func (d *usersDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 func boolFilter(what string) schema.BoolAttribute {
 	return schema.BoolAttribute{
 		Description: fmt.Sprintf(
-			"Keep only users where %s matches this value. Unset means the filter is not applied.",
+			"Filter on whether %s. Set `true` to keep only those users, `false` to exclude "+
+				"them. Leave unset to not filter on this at all — there is no default, so the "+
+				"data source never drops a user you did not ask it to drop.",
 			what,
 		),
 		Optional: true,

@@ -34,6 +34,29 @@ mistyped username has been quietly losing that recipient, and will now say so. S
 
 ### Added
 
+- **`slack_users` data source** — looks up a *set* of users and returns the full object
+  for each, keyed by Slack user ID, plus a `user_ids` set and a `user_count`.
+  - At most one selector: `emails`, `usernames`, or `channel` (a channel **ID**, since
+    Slack's endpoint takes no name). Setting none returns the whole workspace.
+  - Optional tri-state filters — `is_bot`, `deleted`, `is_restricted`,
+    `is_ultra_restricted`, `is_admin`, `is_app_user`. Unset means "don't care"; there are
+    no defaults, so the data source never drops a user you did not ask it to drop.
+  - **This is the answer to the `slack_user_ids` regression below.** That data source
+    resolved N usernames in one call, and `for_each` over `slack_user` costs one
+    workspace scan per username. `slack_users` resolves the whole list in one scan, and
+    returns the users rather than only their IDs.
+  - One paginated `users.list` pass per read regardless of result size. A 200-member
+    channel costs one `conversations.members` walk plus that scan, not 200 `users.info`
+    calls. Requires `users:read`; `users:read.email` additionally for the `emails`
+    selector.
+  - `error_on_no_match` (default `true`) fails the plan on an email or username that
+    matched nothing, naming each one, and on an empty result after filtering. Set it
+    `false` where an empty or partial result is legitimate. A channel that does not exist
+    is always an error — a broken reference is not an empty set.
+  - A rate-limited scan fails rather than returning what it managed to read. A partial
+    set is how a downstream resource deletes things.
+  - Note the attribute is `user_count`, not `count`: Terraform reserves `count`.
+
 - **`slack_user` data source** — looks up a single Slack user by `id`, `email` or `name`
   and exposes the full user object, including a nested `profile` block with display name,
   real name, title, phone, timezone, avatars, and account-status flags.
@@ -50,6 +73,11 @@ mistyped username has been quietly losing that recipient, and will now say so. S
     `team.profile.get`. Null when Slack omits the key, an empty map when the user has none.
   - Note: `users.lookupByEmail` does not match deactivated accounts. Look those up by
     `id`, which returns them with `deleted = true`.
+  - **A null `email` now explains itself.** When Slack confirms the token lacks
+    `users:read.email`, the read emits a warning saying so, instead of leaving an
+    ambiguous null that could equally mean the user has no address. It stays silent when
+    Slack reports no scopes — inferring from silence would warn on every correctly-scoped
+    workspace — and when the scope is held. One warning per data source instance.
 - **Lookup by username** — `slack_user` accepts `name`, the user's Slack handle, matched
   exactly and case-sensitively. This is the capability `slack_user_ids` provided, and it
   now returns the whole user rather than the ID alone.
@@ -82,9 +110,17 @@ mistyped username has been quietly losing that recipient, and will now say so. S
   # data.slack_user.this["u1"].id
   ```
 
-  Note the cost difference: `slack_user_ids` resolved every username in one `users.list`
-  call, whereas `for_each` over `slack_user` scans `users.list` once per username. For
-  large sets, resolve the IDs once and keep them in a variable or local.
+  For a *set* of usernames, use the new **`slack_users`** data source instead of
+  `for_each` over `slack_user`. It resolves the whole list in a single `users.list`
+  scan — the same cost profile `slack_user_ids` had — and returns the full user objects:
+
+  ```hcl
+  data "slack_users" "this" {
+    usernames = ["u1", "u2"]
+  }
+  # data.slack_users.this.users["W012A3CDE"].name
+  # data.slack_users.this.user_ids            -> straight into slack_message.slack_ids
+  ```
 
 ### Fixed
 

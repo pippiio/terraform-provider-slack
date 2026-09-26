@@ -19,6 +19,10 @@ content: |-
   <br>
   <br>
   <br>
+  {{ regexReplaceAll "(?s)\\A---\\n.*?\\n---\\n" (include "docs/data-sources/users.md") "" }}
+  <br>
+  <br>
+  <br>
   {{ regexReplaceAll "(?s)\\A---\\n.*?\\n---\\n" (include "docs/data-sources/user_ids.md") "" }}
   <br>
   <br>
