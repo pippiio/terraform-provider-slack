@@ -183,8 +183,8 @@ func lookupErrorDiagnostic(err error, kind lookupKind, identifier string) (strin
 	kindLabel := kind.label()
 	requiredScope := kind.requiredScope()
 
-	switch slackclient.ErrorCode(err) {
-	case "users_not_found":
+	switch classifySlackError(err) {
+	case slackErrorNotFound:
 		detail := fmt.Sprintf("No Slack user was found for the %s %q.", kindLabel, identifier)
 		switch kind {
 		case lookupByEmail:
@@ -196,7 +196,7 @@ func lookupErrorDiagnostic(err error, kind lookupKind, identifier string) (strin
 		}
 		return "Slack user not found", detail
 
-	case "missing_scope":
+	case slackErrorScope:
 		return "Slack token is missing a required scope", fmt.Sprintf(
 			"Looking a user up by %s requires the %q scope, which this token does not have.\n\n"+
 				"Add the scope to your Slack app, reinstall it to the workspace, and use the "+
@@ -204,7 +204,7 @@ func lookupErrorDiagnostic(err error, kind lookupKind, identifier string) (strin
 			kindLabel, requiredScope, err,
 		)
 
-	case "invalid_auth", "not_authed", "token_revoked", "account_inactive":
+	case slackErrorAuth:
 		return "Slack rejected the API token", fmt.Sprintf(
 			"Slack rejected the configured token while looking up the %s %q.\n\n"+
 				"Check the `token` provider attribute or the SLACK_TOKEN environment variable.\n\n"+
@@ -212,7 +212,7 @@ func lookupErrorDiagnostic(err error, kind lookupKind, identifier string) (strin
 			kindLabel, identifier, err,
 		)
 
-	case "ratelimited":
+	case slackErrorRateLimited:
 		return "Slack rate limit reached", fmt.Sprintf(
 			"Slack rate-limited the lookup for %q. The provider does not retry.\n\n"+
 				"Reduce the number of slack_user data sources resolved in a single apply, or "+

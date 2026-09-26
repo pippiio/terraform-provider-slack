@@ -38,8 +38,8 @@ const scopeInferredFromBehaviour = "Note that none of the users Slack returned h
 // provider keeps rediscovering, and slack_users feeds sets that other resources treat
 // as authoritative.
 func usersScanErrorDiagnostic(err error) (string, string) {
-	switch slackclient.ErrorCode(err) {
-	case "missing_scope":
+	switch classifySlackError(err) {
+	case slackErrorScope:
 		return "Slack token is missing a required scope", fmt.Sprintf(
 			"Reading the workspace user list requires the %q scope, which this token does "+
 				"not have.\n\nAdd the scope to your Slack app, reinstall it to the workspace, "+
@@ -47,14 +47,14 @@ func usersScanErrorDiagnostic(err error) (string, string) {
 			"users:read", err,
 		)
 
-	case "invalid_auth", "not_authed", "token_revoked", "account_inactive":
+	case slackErrorAuth:
 		return "Slack rejected the API token", fmt.Sprintf(
 			"Slack rejected the configured token while listing users.\n\nCheck the `token` "+
 				"provider attribute or the SLACK_TOKEN environment variable.\n\n"+
 				"Underlying error: %s", err,
 		)
 
-	case "ratelimited":
+	case slackErrorRateLimited:
 		return "Slack rate limit reached", fmt.Sprintf(
 			"Slack rate-limited the user list part-way through. The provider does not retry, "+
 				"and will not return a partial result: a half-read workspace would look like "+
