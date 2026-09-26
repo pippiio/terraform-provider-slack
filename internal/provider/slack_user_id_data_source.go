@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"terraform-provider-slack/internal/slackclient"
 	"time"
 
@@ -36,6 +38,15 @@ func (d *userIdDataSource) Metadata(_ context.Context, req datasource.MetadataRe
 
 func (d *userIdDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Resolves a set of Slack usernames to their user IDs in a single " +
+			"`users.list` call.\n\n" +
+			"**Deprecated.** Use the `slack_user` data source, which looks a user up by " +
+			"`name` and returns the full user object rather than the ID alone. This data " +
+			"source will be removed in v2.0.0.",
+		DeprecationMessage: "The slack_user_ids data source is deprecated and will be removed in " +
+			"v2.0.0. Use the slack_user data source with the name argument instead, for example " +
+			"`data \"slack_user\" \"this\" { for_each = toset([\"u1\", \"u2\"]) name = each.value }`, " +
+			"and read .id from it.",
 		Attributes: map[string]schema.Attribute{
 			"usernames": schema.SetAttribute{
 				Description: "Set of usernames to get userids for.",
@@ -48,6 +59,11 @@ func (d *userIdDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 				ElementType: types.StringType,
 			},
 			"last_updated": schema.StringAttribute{
+				Description: "Timestamp of the read, as a formatted string. Carries no useful " +
+					"information: a data source is re-read on every plan, so this is always the " +
+					"current time, and referencing it forces anything downstream to change on " +
+					"every run. It is retained only because removing an attribute would break " +
+					"configurations that read it, and goes away with this data source in v2.0.0.",
 				Computed: true,
 			},
 		},
@@ -92,6 +108,31 @@ func (d *userIdDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		}
 	}
 
+	// A username that resolved to nothing used to be dropped in silence. slack_ids is
+	// consumed as an authoritative set -- slack_message deletes any message whose ID
+	// is no longer present -- so a shrunken map destroys messages that were delivered
+	// perfectly well. Fail instead, and name what could not be found.
+	var unresolved []string
+	for _, u := range usernames {
+		if _, ok := result[u]; !ok {
+			unresolved = append(unresolved, u)
+		}
+	}
+	if len(unresolved) > 0 {
+		sort.Strings(unresolved)
+		resp.Diagnostics.AddError(
+			"Unresolved Slack usernames",
+			fmt.Sprintf(
+				"users.list returned no account for: %s\n\n"+
+					"These would have been dropped from slack_ids, which slack_message treats as "+
+					"authoritative -- the next apply would delete any message already sent to them. "+
+					"Check for a typo, a renamed account, or a deactivated one.",
+				strings.Join(unresolved, ", "),
+			),
+		)
+		return
+	}
+
 	slackMap, diags := types.MapValueFrom(ctx, types.StringType, result)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -117,7 +158,7 @@ func (d *userIdDataSource) Configure(_ context.Context, req datasource.Configure
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *hashicups.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+			fmt.Sprintf("Expected *slackclient.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
 
 		return

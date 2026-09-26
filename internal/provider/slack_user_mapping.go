@@ -1,0 +1,323 @@
+package provider
+
+// Story: Slack user -> Terraform model mapping and error diagnostics
+//
+// Input:  a *slackclient.User, or the error from a failed lookup.
+// Process:
+//   1. Convert each optional field, preserving nil as a Terraform null rather than
+//      collapsing it to "" or false.
+//   2. Mirror profile.email onto the top-level email attribute for convenience.
+//   3. For errors, translate Slack's error code into a diagnostic that tells the
+//      operator what to actually do about it.
+// Output: a populated userDataSourceModel, or a (summary, detail) diagnostic pair.
+//
+// Dependencies: slackclient.ErrorCode for the typed error code.
+// Side effects: none -- pure functions.
+
+import (
+	"context"
+	"fmt"
+
+	"terraform-provider-slack/internal/slackclient"
+
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+)
+
+// tfString renders a nil pointer as null rather than an empty string, so config can
+// tell "Slack omitted this field" from "this field is empty".
+func tfString(p *string) types.String {
+	if p == nil {
+		return types.StringNull()
+	}
+	return types.StringValue(*p)
+}
+
+func tfBool(p *bool) types.Bool {
+	if p == nil {
+		return types.BoolNull()
+	}
+	return types.BoolValue(*p)
+}
+
+func tfInt64(p *int64) types.Int64 {
+	if p == nil {
+		return types.Int64Null()
+	}
+	return types.Int64Value(*p)
+}
+
+// profileFieldsToTF converts Slack's custom profile fields into a dynamically-keyed map.
+//
+// Three states are preserved: nil -> null ("Slack told us nothing"), empty -> empty map
+// ("this user has no custom fields"), populated -> a map keyed by Slack's field ID.
+func profileFieldsToTF(f slackclient.ProfileFields) (types.Map, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	elemType := types.ObjectType{AttrTypes: profileFieldAttrTypes()}
+
+	if f == nil {
+		return types.MapNull(elemType), diags
+	}
+
+	elems := make(map[string]attr.Value, len(f))
+	for id, field := range f {
+		obj, d := types.ObjectValue(profileFieldAttrTypes(), map[string]attr.Value{
+			"value": tfString(field.Value),
+			"alt":   tfString(field.Alt),
+		})
+		diags.Append(d...)
+		elems[id] = obj
+	}
+
+	m, d := types.MapValue(elemType, elems)
+	diags.Append(d...)
+	return m, diags
+}
+
+// userToModel maps a Slack user onto the data source schema.
+func userToModel(ctx context.Context, u *slackclient.User) (userDataSourceModel, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	p := u.Profile
+
+	fields, fieldDiags := profileFieldsToTF(p.Fields)
+	diags.Append(fieldDiags...)
+
+	profileObj, d := types.ObjectValue(profileAttrTypes(), map[string]attr.Value{
+		"real_name":               tfString(p.RealName),
+		"real_name_normalized":    tfString(p.RealNameNormalized),
+		"display_name":            tfString(p.DisplayName),
+		"display_name_normalized": tfString(p.DisplayNameNormalized),
+		"first_name":              tfString(p.FirstName),
+		"last_name":               tfString(p.LastName),
+		"email":                   tfString(p.Email),
+		"title":                   tfString(p.Title),
+		"phone":                   tfString(p.Phone),
+		"skype":                   tfString(p.Skype),
+		"team":                    tfString(p.Team),
+		"status_text":             tfString(p.StatusText),
+		"status_emoji":            tfString(p.StatusEmoji),
+		"status_expiration":       tfInt64(p.StatusExpiration),
+		"avatar_hash":             tfString(p.AvatarHash),
+		"image_24":                tfString(p.Image24),
+		"image_32":                tfString(p.Image32),
+		"image_48":                tfString(p.Image48),
+		"image_72":                tfString(p.Image72),
+		"image_192":               tfString(p.Image192),
+		"image_512":               tfString(p.Image512),
+		"image_1024":              tfString(p.Image1024),
+		"image_original":          tfString(p.ImageOriginal),
+		"is_custom_image":         tfBool(p.IsCustomImage),
+		"bot_id":                  tfString(p.BotID),
+		"api_app_id":              tfString(p.APIAppID),
+		"fields":                  fields,
+	})
+	diags.Append(d...)
+
+	return userDataSourceModel{
+		ID:    types.StringValue(u.ID),
+		Email: tfString(p.Email),
+
+		TeamID:   types.StringValue(u.TeamID),
+		Name:     types.StringValue(u.Name),
+		RealName: tfString(u.RealName),
+		Deleted:  tfBool(u.Deleted),
+		Color:    tfString(u.Color),
+		TZ:       tfString(u.TZ),
+		TZLabel:  tfString(u.TZLabel),
+		TZOffset: tfInt64(u.TZOffset),
+
+		IsAdmin:           tfBool(u.IsAdmin),
+		IsOwner:           tfBool(u.IsOwner),
+		IsPrimaryOwner:    tfBool(u.IsPrimaryOwner),
+		IsRestricted:      tfBool(u.IsRestricted),
+		IsUltraRestricted: tfBool(u.IsUltraRestricted),
+		IsBot:             tfBool(u.IsBot),
+		IsAppUser:         tfBool(u.IsAppUser),
+		IsEmailConfirmed:  tfBool(u.IsEmailConfirmed),
+		Has2FA:            tfBool(u.Has2FA),
+
+		Updated: tfInt64(u.Updated),
+		Profile: profileObj,
+	}, diags
+}
+
+// lookupKind is which of the data source's three selectors was configured. It decides
+// both the wording of a diagnostic and which scope it tells the operator to add.
+type lookupKind int
+
+const (
+	lookupByID lookupKind = iota
+	lookupByEmail
+	lookupByName
+)
+
+// label names the selector as an operator would describe it.
+func (k lookupKind) label() string {
+	switch k {
+	case lookupByID:
+		return "Slack user ID"
+	case lookupByName:
+		return "username"
+	default:
+		return "email address"
+	}
+}
+
+// requiredScope is the scope a missing_scope error is actually asking for. Only the
+// email lookup needs users:read.email; naming it for the others would send the
+// operator to add a scope that changes nothing.
+func (k lookupKind) requiredScope() string {
+	if k == lookupByEmail {
+		return "users:read.email"
+	}
+	return "users:read"
+}
+
+// lookupErrorDiagnostic turns a lookup failure into an actionable message.
+//
+// The point of naming the specific scope or condition is that Slack's raw error codes
+// ("missing_scope") tell an operator nothing about what to change.
+func lookupErrorDiagnostic(err error, kind lookupKind, identifier string) (string, string) {
+	kindLabel := kind.label()
+	requiredScope := kind.requiredScope()
+
+	switch classifySlackError(err) {
+	case slackErrorNotFound:
+		detail := fmt.Sprintf("No Slack user was found for the %s %q.", kindLabel, identifier)
+		switch kind {
+		case lookupByEmail:
+			detail += "\n\nNote that users.lookupByEmail does not match deactivated accounts. " +
+				"If the user has been deactivated, look them up by `id` instead."
+		case lookupByName:
+			detail += "\n\nThis is the user's Slack handle (the `name` field), which is not " +
+				"always their display name. It is matched exactly and is case-sensitive."
+		}
+		return "Slack user not found", detail
+
+	case slackErrorScope:
+		return "Slack token is missing a required scope", fmt.Sprintf(
+			"Looking a user up by %s requires the %q scope, which this token does not have.\n\n"+
+				"Add the scope to your Slack app, reinstall it to the workspace, and use the "+
+				"regenerated token.\n\nUnderlying error: %s",
+			kindLabel, requiredScope, err,
+		)
+
+	case slackErrorAuth:
+		return "Slack rejected the API token", fmt.Sprintf(
+			"Slack rejected the configured token while looking up the %s %q.\n\n"+
+				"Check the `token` provider attribute or the SLACK_TOKEN environment variable.\n\n"+
+				"Underlying error: %s",
+			kindLabel, identifier, err,
+		)
+
+	case slackErrorRateLimited:
+		return "Slack rate limit reached", fmt.Sprintf(
+			"Slack rate-limited the lookup for %q. The provider does not retry.\n\n"+
+				"Reduce the number of slack_user data sources resolved in a single apply, or "+
+				"re-run the apply.\n\nUnderlying error: %s",
+			identifier, err,
+		)
+
+	default:
+		return "Unable to read Slack user", fmt.Sprintf(
+			"Looking up the %s %q failed: %s", kindLabel, identifier, err,
+		)
+	}
+}
+
+// userAttrTypes is the Terraform type of one whole user, mirroring userDataSourceModel.
+//
+// It exists so slack_users can declare its map's element type without restating the
+// object. The two MUST stay in step: ObjectValueFrom reflects over the model's tfsdk
+// tags, so a key here that the model does not declare -- or vice versa -- fails at
+// runtime on every read. TestUserAttrTypes_MatchesModelExactly pins that.
+func userAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":      types.StringType,
+		"email":   types.StringType,
+		"team_id": types.StringType,
+		"name":    types.StringType,
+
+		"real_name": types.StringType,
+		"deleted":   types.BoolType,
+		"color":     types.StringType,
+		"tz":        types.StringType,
+		"tz_label":  types.StringType,
+		"tz_offset": types.Int64Type,
+
+		"is_admin":            types.BoolType,
+		"is_owner":            types.BoolType,
+		"is_primary_owner":    types.BoolType,
+		"is_restricted":       types.BoolType,
+		"is_ultra_restricted": types.BoolType,
+		"is_bot":              types.BoolType,
+		"is_app_user":         types.BoolType,
+		"is_email_confirmed":  types.BoolType,
+		"has_2fa":             types.BoolType,
+
+		"updated": types.Int64Type,
+		"profile": types.ObjectType{AttrTypes: profileAttrTypes()},
+	}
+}
+
+// userToObject renders a Slack user as the object slack_users nests in its map.
+//
+// It deliberately goes through userToModel rather than mapping the fields a second
+// time. That mapping is the thing worth not duplicating -- it carries the null-vs-empty
+// discipline the whole data source rests on -- and ObjectValueFrom can build the object
+// from the model's tfsdk tags without it being restated.
+func userToObject(ctx context.Context, u *slackclient.User) (types.Object, diag.Diagnostics) {
+	model, diags := userToModel(ctx, u)
+	if diags.HasError() {
+		return types.ObjectNull(userAttrTypes()), diags
+	}
+
+	obj, d := types.ObjectValueFrom(ctx, userAttrTypes(), model)
+	diags.Append(d...)
+	return obj, diags
+}
+
+// emailScopeWarning explains a null email when, and only when, the token is positively
+// known to lack the scope that populates it.
+//
+// profile.email is null for two unrelated reasons -- this user has no email, or the
+// token cannot see any -- and Slack omits the field either way, so the attribute alone
+// cannot tell them apart. The scope header can, when Slack sends it.
+//
+// Deliberately silent in the other two cases. If Slack reported no scopes, nothing is
+// known and inferring from silence would warn on every correctly-scoped workspace whose
+// users simply have no address set. If the scope is held, a null email is a fact about
+// the user rather than a problem.
+//
+// One warning per data source instance: a configuration with fifty slack_user blocks and
+// no scope produces fifty. That is proportionate to the problem and stops the moment the
+// scope is added, but it is why this fires only on certainty.
+func emailScopeWarning(c *slackclient.Client, u *slackclient.User) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	if u.Profile.Email != nil {
+		return diags
+	}
+
+	scopes, known := c.GrantedScopes()
+	if !known || scopes[emailScope] {
+		return diags
+	}
+
+	diags.AddWarning(
+		"Slack user email is unavailable, not absent",
+		fmt.Sprintf(
+			"`email` and `profile.email` are null for %q because this token does not hold "+
+				"the %q scope, which Slack has confirmed. Slack omits the field entirely "+
+				"rather than reporting an error, so a null here does not mean the user has "+
+				"no email address.\n\n"+
+				"Add the scope to your Slack app, reinstall it to the workspace, and use the "+
+				"regenerated token. If you do not need the address, this warning is safe to "+
+				"ignore.",
+			u.Name, emailScope,
+		),
+	)
+	return diags
+}

@@ -1,0 +1,366 @@
+package provider
+
+// Story: slack_users data source
+//
+// Input:  a config with at most one selector (emails, usernames, channel) and any
+//         number of tri-state filters.
+// Process:
+//   1. Read the config; ConfigValidators has already enforced at-most-one-of.
+//   2. Resolve the container, if there is one, into a set of member IDs.
+//   3. Make one paginated users.list pass, keeping users the selector matches.
+//   4. Apply the tri-state filters to what matched.
+//   5. Apply the no-match policy: unresolved inputs, then emptiness.
+// Output: a map of full user objects keyed by user ID, an ID set, and a count.
+//
+// Dependencies: slackclient.ListChannelMembers and the users.list scan; userToObject
+// from slack_user_mapping.go for the element shape.
+// Side effects: one users.list page-walk per read, plus one conversations.members
+// page-walk when the channel selector is set. No writes.
+//
+// Why one scan rather than per-input lookups: users.lookupByEmail does not match
+// deactivated accounts and users.list does, so a size-triggered hybrid would return
+// different users for the same config depending on how many emails were passed, and
+// the `deleted` filter would be unimplementable on half of it.
+
+import (
+	"context"
+	"fmt"
+
+	"terraform-provider-slack/internal/slackclient"
+
+	"github.com/hashicorp/terraform-plugin-framework-validators/datasourcevalidator"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+)
+
+var (
+	_ datasource.DataSource                     = &usersDataSource{}
+	_ datasource.DataSourceWithConfigure        = &usersDataSource{}
+	_ datasource.DataSourceWithConfigValidators = &usersDataSource{}
+)
+
+func NewUsersDataSource() datasource.DataSource {
+	return &usersDataSource{}
+}
+
+type usersDataSource struct {
+	client *slackclient.Client
+}
+
+type usersDataSourceModel struct {
+	// Selectors. At most one may be set; none means the whole workspace.
+	Emails    types.Set    `tfsdk:"emails"`
+	Usernames types.Set    `tfsdk:"usernames"`
+	Channel   types.String `tfsdk:"channel"`
+
+	// Filters. Null means "don't care" -- the three-way distinction is the point.
+	IsBot             types.Bool `tfsdk:"is_bot"`
+	Deleted           types.Bool `tfsdk:"deleted"`
+	IsRestricted      types.Bool `tfsdk:"is_restricted"`
+	IsUltraRestricted types.Bool `tfsdk:"is_ultra_restricted"`
+	IsAdmin           types.Bool `tfsdk:"is_admin"`
+	IsAppUser         types.Bool `tfsdk:"is_app_user"`
+
+	ErrorOnNoMatch types.Bool `tfsdk:"error_on_no_match"`
+
+	Users     types.Map   `tfsdk:"users"`
+	UserIDs   types.Set   `tfsdk:"user_ids"`
+	UserCount types.Int64 `tfsdk:"user_count"`
+}
+
+func (d *usersDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_users"
+}
+
+// ConfigValidators enforces at-most-one selector.
+//
+// Conflicting is the validator for this: it errors only when two or more are set, and
+// permits zero, which is the whole-workspace case. ExactlyOneOf would forbid that.
+func (d *usersDataSource) ConfigValidators(_ context.Context) []datasource.ConfigValidator {
+	return []datasource.ConfigValidator{
+		datasourcevalidator.Conflicting(
+			path.MatchRoot("emails"),
+			path.MatchRoot("usernames"),
+			path.MatchRoot("channel"),
+		),
+	}
+}
+
+func (d *usersDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Looks up a set of Slack users. At most one of `emails`, `usernames` or " +
+			"`channel` may be set; setting none returns every user in the workspace. The " +
+			"optional boolean filters narrow whatever the selector matched.\n\n" +
+			"Every read costs one paginated pass over `users.list`, regardless of how many " +
+			"users come back, because Slack's membership endpoints return IDs rather than " +
+			"user objects. Requires `users:read`; `users:read.email` is additionally required " +
+			"for the `emails` selector and for `email` to be populated.",
+		Attributes: map[string]schema.Attribute{
+			"emails": schema.SetAttribute{
+				Description: "Email addresses to resolve. Matched case-insensitively against " +
+					"`profile.email`. Requires the `users:read.email` scope; without it Slack " +
+					"omits the field entirely and nothing can match.",
+				ElementType: types.StringType,
+				Optional:    true,
+			},
+			"usernames": schema.SetAttribute{
+				Description: "Slack handles to resolve, matched against `name`. Exact and " +
+					"case-sensitive, unlike `emails`.",
+				ElementType: types.StringType,
+				Optional:    true,
+			},
+			"channel": schema.StringAttribute{
+				Description: "Channel ID, e.g. `C012AB3CD`, whose members to return. This is an " +
+					"ID, not a name — Slack's endpoint takes no name. Requires `channels:read` " +
+					"for public channels or `groups:read` for private ones.",
+				Optional: true,
+			},
+
+			"is_bot":              boolFilter("the user is a bot"),
+			"deleted":             boolFilter("the account has been deactivated"),
+			"is_restricted":       boolFilter("the user is a multi-channel guest"),
+			"is_ultra_restricted": boolFilter("the user is a single-channel guest"),
+			"is_admin":            boolFilter("the user is a workspace admin"),
+			"is_app_user":         boolFilter("the user is an authorised app user"),
+
+			"error_on_no_match": schema.BoolAttribute{
+				Description: "Whether a read with nothing to show fails. Defaults to `true`, " +
+					"which covers two cases: an email or username that matched no account, " +
+					"named individually; and an empty result after filtering.\n\n" +
+					"Note the default makes a channel filtered down to zero matches an error. " +
+					"Set `false` where an empty result is a legitimate state. A channel that " +
+					"does not exist is always an error either way — that is a broken reference, " +
+					"not an empty set.",
+				Optional: true,
+			},
+
+			// Declared as a MapAttribute over the shared object type rather than a
+			// MapNestedAttribute. A nested attribute would need every field restated
+			// with its own description -- a second copy of the 27-field profile, which
+			// is the drift FR-11 exists to prevent. The cost is that the generated docs
+			// show the object's shape inline instead of a field table; the schema
+			// description points readers at slack_user, which documents each field.
+			"users": schema.MapAttribute{
+				Description: "The matched users, keyed by Slack user ID. Each value is the same " +
+					"object the `slack_user` data source exposes, and is documented there. " +
+					"Re-key by any attribute with a `for` expression, e.g. " +
+					"`{ for id, u in data.slack_users.this.users : u.name => u }`.",
+				Computed:    true,
+				ElementType: types.ObjectType{AttrTypes: userAttrTypes()},
+			},
+			"user_ids": schema.SetAttribute{
+				Description: "The matched user IDs. A convenience projection of `users`, for " +
+					"wiring straight into `slack_message.slack_ids` or `slack_usergroup.users`.",
+				ElementType: types.StringType,
+				Computed:    true,
+			},
+			"user_count": schema.Int64Attribute{
+				Description: "How many users matched. Named `user_count` rather than `count` " +
+					"because Terraform reserves `count` as a meta-argument.",
+				Computed: true,
+			},
+		},
+	}
+}
+
+// boolFilter builds one tri-state filter attribute. Leaving it unset means "don't
+// care"; setting it requires the user's flag to equal it. There is deliberately no
+// default: a data source that silently drops users nobody asked it to drop is the
+// mistake slack_user_ids was just fixed for.
+func boolFilter(what string) schema.BoolAttribute {
+	return schema.BoolAttribute{
+		Description: fmt.Sprintf(
+			"Filter on whether %s. Set `true` to keep only those users, `false` to exclude "+
+				"them. Leave unset to not filter on this at all — there is no default, so the "+
+				"data source never drops a user you did not ask it to drop.",
+			what,
+		),
+		Optional: true,
+	}
+}
+
+func (d *usersDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+
+	client, ok := req.ProviderData.(*slackclient.Client)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Unexpected Data Source Configure Type",
+			fmt.Sprintf("Expected *slackclient.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+		)
+		return
+	}
+
+	d.client = client
+}
+
+func (d *usersDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var config usersDataSourceModel
+
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	selector, diags := d.buildSelector(ctx, config)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// One scan, however many users come back. The selector decides what to keep as each
+	// page arrives, so an input list that is satisfied early stops the walk there.
+	matched := make(map[string]*slackclient.User)
+	satisfied := make(map[string]struct{})
+	wanted := selector.inputCount()
+	needsEmail := !config.Emails.IsNull()
+	sawAnyEmail := false
+	scopeErr := false
+
+	err := d.client.ScanUsers(func(members []slackclient.User) bool {
+		// FR-9 authoritative path. Checked per page rather than up front because the
+		// scopes only become known once Slack has answered something: the first page is
+		// the earliest possible moment, and every page after it would be wasted.
+		if needsEmail && !scopeErr {
+			if scopes, known := d.client.GrantedScopes(); known && !scopes[emailScope] {
+				scopeErr = true
+				return true
+			}
+		}
+
+		for i := range members {
+			u := &members[i]
+			if u.Profile.Email != nil && *u.Profile.Email != "" {
+				sawAnyEmail = true
+			}
+			input, ok := selector.match(u)
+			if !ok {
+				continue
+			}
+			matched[u.ID] = u
+			if input != "" {
+				satisfied[input] = struct{}{}
+			}
+		}
+		// Only an input-driven selector can finish early: proving a *miss* still
+		// requires reading every page.
+		return wanted > 0 && len(satisfied) == wanted
+	})
+	if err != nil {
+		summary, detail := usersScanErrorDiagnostic(err)
+		resp.Diagnostics.AddError(summary, detail)
+		return
+	}
+
+	if scopeErr {
+		summary, detail := missingEmailScopeDiagnostic()
+		resp.Diagnostics.AddError(summary, detail)
+		return
+	}
+
+	errorOnNoMatch := config.ErrorOnNoMatch.IsNull() || config.ErrorOnNoMatch.ValueBool()
+
+	// FR-5: unresolved is judged on what matched, before filtering. An input naming a
+	// real account that a filter then removed is an empty result, not a missing user.
+	if errorOnNoMatch {
+		if missing := selector.unresolved(satisfied); len(missing) > 0 {
+			summary, detail := unresolvedInputsDiagnostic(missing, config, sawAnyEmail)
+			resp.Diagnostics.AddError(summary, detail)
+			return
+		}
+	}
+
+	filters := filtersFrom(config)
+	kept := make([]*slackclient.User, 0, len(matched))
+	for _, u := range matched {
+		if filters.keep(u) {
+			kept = append(kept, u)
+		}
+	}
+
+	if errorOnNoMatch && len(kept) == 0 {
+		resp.Diagnostics.AddError(
+			"No Slack users matched",
+			"The selector and filters together matched no users.\n\n"+
+				"Set `error_on_no_match = false` if an empty result is a legitimate state "+
+				"here -- a channel whose members are all bots, for instance, when "+
+				"`is_bot = false` is set.",
+		)
+		return
+	}
+
+	state := config
+	state.Users, state.UserIDs, state.UserCount, diags = usersToState(ctx, kept)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// buildSelector turns the config into a selector, resolving a container if one was set.
+func (d *usersDataSource) buildSelector(ctx context.Context, config usersDataSourceModel) (userSelector, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	sel := userSelector{}
+
+	if !config.Emails.IsNull() {
+		var emails []string
+		diags.Append(config.Emails.ElementsAs(ctx, &emails, false)...)
+		sel.wantEmails = make(map[string]string, len(emails))
+		for _, e := range emails {
+			sel.wantEmails[normaliseEmail(e)] = e
+		}
+	}
+
+	if !config.Usernames.IsNull() {
+		var names []string
+		diags.Append(config.Usernames.ElementsAs(ctx, &names, false)...)
+		sel.wantNames = make(map[string]struct{}, len(names))
+		for _, n := range names {
+			sel.wantNames[n] = struct{}{}
+		}
+	}
+
+	if !config.Channel.IsNull() {
+		channel := config.Channel.ValueString()
+		members, err := d.client.ListChannelMembers(channel)
+		if err != nil {
+			summary, detail := channelErrorDiagnostic(err, channel)
+			diags.AddError(summary, detail)
+			return sel, diags
+		}
+		sel.hasContainer = true
+		sel.containerIDs = make(map[string]struct{}, len(members))
+		for _, id := range members {
+			sel.containerIDs[id] = struct{}{}
+		}
+	}
+
+	return sel, diags
+}
+
+// filtersFrom lifts the tri-state filters out of the config. A null attribute stays a
+// nil pointer, which is what "not configured" means to userFilters.
+func filtersFrom(config usersDataSourceModel) userFilters {
+	tri := func(b types.Bool) *bool {
+		if b.IsNull() || b.IsUnknown() {
+			return nil
+		}
+		v := b.ValueBool()
+		return &v
+	}
+	return userFilters{
+		isBot:             tri(config.IsBot),
+		deleted:           tri(config.Deleted),
+		isRestricted:      tri(config.IsRestricted),
+		isUltraRestricted: tri(config.IsUltraRestricted),
+		isAdmin:           tri(config.IsAdmin),
+		isAppUser:         tri(config.IsAppUser),
+	}
+}

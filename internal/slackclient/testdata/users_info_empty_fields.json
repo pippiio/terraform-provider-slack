@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "user": {
+    "id": "W07QCRPA4",
+    "team_id": "T012AB3C4",
+    "name": "glinda",
+    "deleted": false,
+    "real_name": "Glinda Southgood",
+    "tz_offset": 0,
+    "profile": {
+      "real_name": "Glinda Southgood",
+      "display_name": "glinda",
+      "team": "T012AB3C4",
+      "fields": []
+    },
+    "is_bot": false,
+    "updated": 1502138686
+  }
+}
